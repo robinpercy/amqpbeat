@@ -20,16 +20,13 @@ func TestCanStartAndStopBeat(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		rb.Run(b)
-		fmt.Print("DONE RUNNING")
 		wg.Done()
 	}()
 
 	time.AfterFunc(time.Second, func() {
 		rb.Stop()
 	})
-	fmt.Print("Waiting")
 	wg.Wait()
-	fmt.Print("Done test")
 }
 
 func TestConfigIsLoaded(t *testing.T) {
@@ -40,15 +37,14 @@ func TestConfigIsLoaded(t *testing.T) {
 }
 
 func TestCanReceiveMessage(t *testing.T) {
-	pub := newPublisher("", "test")
-	defer pub.close()
 
 	expected := "This is a test"
 	test := fmt.Sprintf("{\"payload\": \"%s\"}", expected)
-	pub.send(test)
 
 	received := false
 	rb, b := helpBuildBeat("./test_data/full.yml")
+	pub := newPublisher(*rb.RbConfig.AmqpInput.ServerURI, &(*rb.RbConfig.AmqpInput.Channels)[0], nil)
+	defer pub.close()
 
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
@@ -58,24 +54,74 @@ func TestCanReceiveMessage(t *testing.T) {
 		wg.Done()
 	}
 
-	fmt.Printf("Events1 = %v\n", b.Events)
 	b.Events = &MockClient{beat: rb,
 		eventPublished: func(event common.MapStr, beat *RabbitBeat) {
-			fmt.Printf("eventPublished: %v\n", event)
 			received = true
 			assert.Equal(t, expected, event["payload"])
 			exitTest()
 		},
 	}
-	fmt.Printf("Events2 = %v\n", b.Events)
+
+	go rb.Run(b)
+	pub.send(test)
+
+	wg.Wait()
+	assert.True(t, received, "Did not receive message")
+}
+
+func TestCanReceiveOnMultipleQueues(t *testing.T) {
+
+	expected := "This is a test"
+	test := fmt.Sprintf("{\"payload\": \"%s\"}", expected)
+
+	rb, b := helpBuildBeat("./test_data/multi.yml")
+	input := rb.RbConfig.AmqpInput
+
+	var ch *amqp.Channel
+	pubs := make([]*Publisher, len(*input.Channels))
+	for i, cfg := range *input.Channels {
+		pub := newPublisher(*input.ServerURI, &cfg, ch)
+		if pub.conn != nil {
+			ch = pub.ch
+			defer pub.close()
+		}
+		pubs[i] = pub
+		ch.QueuePurge(*cfg.Name, true)
+	}
+
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	exitTest := func() {
+		rb.Stop()
+		wg.Done()
+	}
+
+	counts := make(map[string]int)
+	msgPerQueue := 100
+	totalMsgs := msgPerQueue * len(pubs)
+	received := 0
+
+	b.Events = &MockClient{beat: rb,
+		eventPublished: func(event common.MapStr, beat *RabbitBeat) {
+			received += 1
+			counts[event["type"].(string)] += 1
+			assert.Equal(t, expected, event["payload"])
+			if received == totalMsgs {
+				exitTest()
+			}
+		},
+	}
 
 	go rb.Run(b)
 
-	time.AfterFunc(3*time.Second, func() {
-		exitTest()
-	})
+	for i := 0; i < totalMsgs; i++ {
+		pubs[i%len(pubs)].send(test)
+	}
+
 	wg.Wait()
-	assert.True(t, received, "Did not receive message")
+	for i := 0; i < len(pubs); i++ {
+		assert.Equal(t, msgPerQueue, counts[pubs[i].typeTag], "Did not receive all messages for publisher")
+	}
 }
 
 func helpBuildBeat(cfgFile string) (*RabbitBeat, *beat.Beat) {
@@ -95,28 +141,45 @@ type Publisher struct {
 	ch         *amqp.Channel
 	exch       string
 	routingKey string
+	typeTag    string
 }
 
-func newPublisher(exch string, routingKey string) *Publisher {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	utils.FailOnError(err, "Failed to connect to RabbitMQ")
+/*
+If ch is nil, a new Connection and Channel will be created, and this publisher
+will 'own' the connection. A call to close() will close both channel and connection.
 
-	ch, err := conn.Channel()
-	utils.FailOnError(err, "Failed to open a channel")
+If ch is provided, then this publisher will reuse the channel and
+calls to close() will do nothing.
+*/
+func newPublisher(serverURI string, cfg *ChannelConfig, ch *amqp.Channel) *Publisher {
 
-	_, err = ch.QueueDeclare(routingKey, false, false, false, false, nil)
+	var conn *amqp.Connection
+	var err error
 
-	utils.FailOnError(err, fmt.Sprintf("Failed to declare queue %s", routingKey))
-	return &Publisher{exch: exch, routingKey: routingKey, conn: conn, ch: ch}
+	if ch == nil {
+		conn, err = amqp.Dial(serverURI)
+		utils.FailOnError(err, "Failed to connect to RabbitMQ")
+
+		ch, err = conn.Channel()
+		utils.FailOnError(err, "Failed to open a channel")
+	}
+
+	_, err = ch.QueueDeclare(*cfg.Name, *cfg.Durable, *cfg.AutoDelete, *cfg.Exclusive, false, *cfg.Args)
+
+	utils.FailOnError(err, fmt.Sprintf("Failed to declare queue %s", cfg.Name))
+	return &Publisher{exch: "", routingKey: *cfg.Name, conn: conn, ch: ch, typeTag: *cfg.TypeTag}
 }
 
 func (p *Publisher) close() {
-	defer p.conn.Close()
-	defer p.ch.Close()
+	// Only close if this instance was responsible for creating the connection
+	if p.conn != nil {
+		defer p.conn.Close()
+		defer p.ch.Close()
+	}
 }
 
 func (p *Publisher) send(msg string) {
-	err := (*p.ch).Publish("", "test", false, false, amqp.Publishing{
+	err := (*p.ch).Publish("", p.routingKey, false, false, amqp.Publishing{
 		DeliveryMode: amqp.Persistent,
 		ContentType:  "text/plain",
 		Body:         []byte(msg),
@@ -132,7 +195,6 @@ type MockClient struct {
 }
 
 func (c MockClient) PublishEvent(event common.MapStr, opts ...publisher.ClientOption) bool {
-	fmt.Println("PublishEvent")
 	c.eventPublished(event, c.beat)
 	c.lastReceived = time.Now()
 	return true

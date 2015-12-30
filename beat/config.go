@@ -20,6 +20,7 @@ type ChannelConfig struct {
 	MaxIntervalMS     *int
 	MinIntervalMS     *int
 	MaxMessagesPerSec *int
+	TypeTag           *string
 }
 
 // AmqpConfig ...
@@ -80,6 +81,11 @@ func (c *ChannelConfig) SetDefaults() {
 	if c.Args == nil {
 		c.Args = new(amqp.Table)
 		*c.Args = nil
+	}
+
+	if c.TypeTag == nil {
+		c.TypeTag = new(string)
+		*c.TypeTag = "event"
 	}
 }
 

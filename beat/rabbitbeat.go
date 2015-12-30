@@ -2,7 +2,6 @@ package beat
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/elastic/libbeat/cfgfile"
 	"github.com/elastic/libbeat/common"
 	"github.com/elastic/libbeat/logp"
+	"github.com/elastic/libbeat/publisher"
 	"github.com/streadway/amqp"
 )
 
@@ -39,25 +39,6 @@ func (rb *RabbitBeat) Setup(b *beat.Beat) error {
 }
 
 func (rb *RabbitBeat) Run(b *beat.Beat) error {
-
-	fmt.Printf("Events3 = %v\n", b.Events)
-	serverURI := rb.RbConfig.AmqpInput.ServerURI
-	conn, err := amqp.Dial(*serverURI)
-	defer conn.Close()
-	if err != nil {
-		logp.Err("Failed to connect to RabbitMQ at '%s': %v", *serverURI, err)
-		return err
-	}
-
-	ch, err := conn.Channel()
-	if err != nil {
-		logp.Err("Failed to open RabbitMQ channel: %v", err)
-		return err
-	}
-	defer ch.Close()
-
-	events := make(chan common.MapStr)
-
 	/*
 			  The go routines below setup a pipeline that collects the messages received
 			  on each queue into a single channel.
@@ -68,69 +49,76 @@ func (rb *RabbitBeat) Run(b *beat.Beat) error {
 			    as well as the amqp connection
 		    In other words, the entire pipeline can be stopped by closing rb.stop
 	*/
+	serverURI := rb.RbConfig.AmqpInput.ServerURI
+
+	conn, err := amqp.Dial(*serverURI)
+	if err != nil {
+		logp.Err("Failed to connect to RabbitMQ at '%s': %v", *serverURI, err)
+		return err
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
+		logp.Err("Failed to open RabbitMQ channel: %v", err)
+		return err
+	}
+	defer ch.Close()
+
 	var wg sync.WaitGroup
+	events := make(chan common.MapStr)
+
 	wg.Add(len(*rb.RbConfig.AmqpInput.Channels))
 
-	consume := func(c *ChannelConfig) {
-		defer wg.Done()
-		defer fmt.Errorf("Done consuming")
-		fmt.Println("Starting to consume")
-		_, err = ch.QueueDeclare(*c.Name, *c.Durable, *c.AutoDelete, false, false, *c.Args)
-		if err != nil {
-			fmt.Printf("Error: %v", err)
-			logp.Err("Failed to declare queue '%s': %v", *c.Name, err)
-			return
-		}
-
-		q, err := ch.Consume(*c.Name, "", false, false, false, false, *c.Args)
-		if err != nil {
-			logp.Err("Failed to consume queue %s: %v", *c.Name, err)
-			return
-		}
-
-		for {
-			select {
-			case d := <-q:
-				fmt.Printf("Got message: %v\n", string(d.Body))
-				// process delivery
-				m := common.MapStr{}
-				err = json.Unmarshal(d.Body, &m)
-				if err != nil {
-					fmt.Printf("Error unmarshalling: %s", err)
-				}
-				events <- m
-				d.Ack(false)
-			case <-rb.stop:
-				return
-			}
-		}
-	}
-
 	for _, c := range *rb.RbConfig.AmqpInput.Channels {
-		go consume(&c)
+		cfg := c
+		go rb.consumeIntoStream(events, ch, &cfg, &wg)
 	}
 
-	/*
-		go func() {
-			defer conn.Close()
-			defer ch.Close()
-			wg.Wait()
-			close(events)
-		}()
-	*/
-
-	go func() {
-		for e := range events {
-			fmt.Printf("Sending message %v\n", e)
-			e["@timestamp"] = time.Now()
-			b.Events.PublishEvent(e)
-		}
-	}()
-
+	go publishStream(events, b.Events)
 	wg.Wait()
-	fmt.Println("DONE")
 
 	return nil
+}
+
+func (rb *RabbitBeat) consumeIntoStream(stream chan<- common.MapStr, ch *amqp.Channel, c *ChannelConfig, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	_, err := ch.QueueDeclare(*c.Name, *c.Durable, *c.AutoDelete, false, false, *c.Args)
+	if err != nil {
+		logp.Err("Failed to declare queue '%s': %v", *c.Name, err)
+		return
+	}
+
+	q, err := ch.Consume(*c.Name, "", false, false, false, false, *c.Args)
+	if err != nil {
+		logp.Err("Failed to consume queue %s: %v", *c.Name, err)
+		return
+	}
+
+	for {
+		select {
+		case d := <-q:
+			// process delivery
+			m := common.MapStr{}
+			err = json.Unmarshal(d.Body, &m)
+			if err != nil {
+				logp.Err("Error unmarshalling: %s", err)
+			}
+			m["@timestamp"] = time.Now()
+			m["type"] = *c.TypeTag
+			stream <- m
+			d.Ack(false)
+		case <-rb.stop:
+			return
+		}
+	}
+}
+
+func publishStream(stream chan common.MapStr, client publisher.Client) {
+	for e := range stream {
+		client.PublishEvent(e)
+	}
 }
 
 func (rb *RabbitBeat) Cleanup(b *beat.Beat) error {
@@ -138,9 +126,7 @@ func (rb *RabbitBeat) Cleanup(b *beat.Beat) error {
 }
 
 func (rb *RabbitBeat) Stop() {
-	fmt.Println("Stopping")
 	if rb.stop != nil {
-		fmt.Println("Closing")
 		close(rb.stop)
 	}
 }
