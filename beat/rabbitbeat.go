@@ -2,6 +2,7 @@ package beat
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -39,6 +40,8 @@ func (rb *RabbitBeat) Setup(b *beat.Beat) error {
 }
 
 func (rb *RabbitBeat) Run(b *beat.Beat) error {
+	fmt.Println("Running...")
+	logp.Info("Running...")
 	/*
 			  The go routines below setup a pipeline that collects the messages received
 			  on each queue into a single channel.
@@ -105,7 +108,7 @@ func (rb *RabbitBeat) consumeIntoStream(stream chan<- common.MapStr, ch *amqp.Ch
 			if err != nil {
 				logp.Err("Error unmarshalling: %s", err)
 			}
-			m["@timestamp"] = time.Now()
+			m["@timestamp"] = common.Time(time.Now())
 			m["type"] = *c.TypeTag
 			stream <- m
 			d.Ack(false)
@@ -117,6 +120,7 @@ func (rb *RabbitBeat) consumeIntoStream(stream chan<- common.MapStr, ch *amqp.Ch
 
 func publishStream(stream chan common.MapStr, client publisher.Client) {
 	for e := range stream {
+		logp.Debug("", "Publishing event: %v", e)
 		client.PublishEvent(e)
 	}
 }
