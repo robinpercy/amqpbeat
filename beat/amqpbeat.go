@@ -2,7 +2,6 @@ package beat
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 
@@ -14,16 +13,16 @@ import (
 	"github.com/streadway/amqp"
 )
 
-type RabbitBeat struct {
+type AmqpBeat struct {
 	RbConfig Settings
 	stop     chan interface{}
 }
 
-func (rb *RabbitBeat) Config(b *beat.Beat) error {
+func (rb *AmqpBeat) Config(b *beat.Beat) error {
 	return rb.ConfigWithFile(b, "")
 }
 
-func (rb *RabbitBeat) ConfigWithFile(b *beat.Beat, filePath string) error {
+func (rb *AmqpBeat) ConfigWithFile(b *beat.Beat, filePath string) error {
 	err := cfgfile.Read(&rb.RbConfig, filePath)
 	if err != nil {
 		logp.Err("Error reading configuration file:'%s' %v", filePath, err)
@@ -34,13 +33,12 @@ func (rb *RabbitBeat) ConfigWithFile(b *beat.Beat, filePath string) error {
 	return nil
 }
 
-func (rb *RabbitBeat) Setup(b *beat.Beat) error {
+func (rb *AmqpBeat) Setup(b *beat.Beat) error {
 	rb.stop = make(chan interface{})
 	return nil
 }
 
-func (rb *RabbitBeat) Run(b *beat.Beat) error {
-	fmt.Println("Running...")
+func (rb *AmqpBeat) Run(b *beat.Beat) error {
 	logp.Info("Running...")
 	/*
 			  The go routines below setup a pipeline that collects the messages received
@@ -69,7 +67,7 @@ func (rb *RabbitBeat) Run(b *beat.Beat) error {
 	defer ch.Close()
 
 	var wg sync.WaitGroup
-	events := make(chan common.MapStr)
+	events := make(chan *TaggedDelivery)
 
 	wg.Add(len(*rb.RbConfig.AmqpInput.Channels))
 
@@ -84,7 +82,7 @@ func (rb *RabbitBeat) Run(b *beat.Beat) error {
 	return nil
 }
 
-func (rb *RabbitBeat) consumeIntoStream(stream chan<- common.MapStr, ch *amqp.Channel, c *ChannelConfig, wg *sync.WaitGroup) {
+func (rb *AmqpBeat) consumeIntoStream(stream chan<- *TaggedDelivery, ch *amqp.Channel, c *ChannelConfig, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	_, err := ch.QueueDeclare(*c.Name, *c.Durable, *c.AutoDelete, false, false, *c.Args)
@@ -102,34 +100,45 @@ func (rb *RabbitBeat) consumeIntoStream(stream chan<- common.MapStr, ch *amqp.Ch
 	for {
 		select {
 		case d := <-q:
-			// process delivery
-			m := common.MapStr{}
-			err = json.Unmarshal(d.Body, &m)
-			if err != nil {
-				logp.Err("Error unmarshalling: %s", err)
-			}
-			m["@timestamp"] = common.Time(time.Now())
-			m["type"] = *c.TypeTag
-			stream <- m
-			d.Ack(false)
+			stream <- &TaggedDelivery{delivery: &d, typeTag: c.TypeTag}
 		case <-rb.stop:
 			return
 		}
 	}
 }
 
-func publishStream(stream chan common.MapStr, client publisher.Client) {
-	for e := range stream {
-		logp.Debug("", "Publishing event: %v", e)
-		client.PublishEvent(e)
+type TaggedDelivery struct {
+	delivery *amqp.Delivery
+	typeTag  *string
+}
+
+func publishStream(stream <-chan *TaggedDelivery, client publisher.Client) {
+	for td := range stream {
+		// process delivery
+		m := common.MapStr{}
+		err := json.Unmarshal(td.delivery.Body, &m)
+		if err != nil {
+			logp.Err("Error unmarshalling: %s", err)
+		}
+		m["@timestamp"] = common.Time(time.Now())
+		m["type"] = *td.typeTag
+		logp.Debug("", "Publishing event: %v", m)
+		success := client.PublishEvent(m, publisher.Sync)
+		if success {
+			logp.Info("Acked event")
+			td.delivery.Ack(false)
+		} else {
+			logp.Err("Failed to publish event: %v", m)
+			td.delivery.Nack(false, true)
+		}
 	}
 }
 
-func (rb *RabbitBeat) Cleanup(b *beat.Beat) error {
+func (rb *AmqpBeat) Cleanup(b *beat.Beat) error {
 	return nil
 }
 
-func (rb *RabbitBeat) Stop() {
+func (rb *AmqpBeat) Stop() {
 	if rb.stop != nil {
 		close(rb.stop)
 	}

@@ -5,22 +5,22 @@ import (
 
 	libbeat "github.com/elastic/libbeat/beat"
 	"github.com/elastic/libbeat/logp"
-	"github.com/robinpercy/rabbitbeat/beat"
+	"github.com/robinpercy/amqpbeat/beat"
 )
 
 var name = "amqpbeat"
 var version = "1.0.0-alpha"
 
 func main() {
-	rb := &beat.RabbitBeat{}
+	ab := &beat.AmqpBeat{}
 
-	b := libbeat.NewBeat(name, version, rb)
+	b := libbeat.NewBeat(name, version, ab)
 
 	b.CommandLineSetup()
 
 	b.LoadConfig()
 
-	err := rb.Config(b)
+	err := ab.Config(b)
 
 	if err != nil {
 		logp.Critical("Cannot start due to configuration error: %v", err)

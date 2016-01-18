@@ -55,7 +55,7 @@ func TestCanReceiveMessage(t *testing.T) {
 	}
 
 	b.Events = &MockClient{beat: rb,
-		eventPublished: func(event common.MapStr, beat *RabbitBeat) {
+		eventPublished: func(event common.MapStr, beat *AmqpBeat) {
 			received = true
 			assert.Equal(t, expected, event["payload"])
 			exitTest()
@@ -102,7 +102,7 @@ func TestCanReceiveOnMultipleQueues(t *testing.T) {
 	received := 0
 
 	b.Events = &MockClient{beat: rb,
-		eventPublished: func(event common.MapStr, beat *RabbitBeat) {
+		eventPublished: func(event common.MapStr, beat *AmqpBeat) {
 			received += 1
 			counts[event["type"].(string)] += 1
 			assert.Equal(t, expected, event["payload"])
@@ -124,11 +124,11 @@ func TestCanReceiveOnMultipleQueues(t *testing.T) {
 	}
 }
 
-func helpBuildBeat(cfgFile string) (*RabbitBeat, *beat.Beat) {
-	rb := new(RabbitBeat)
+func helpBuildBeat(cfgFile string) (*AmqpBeat, *beat.Beat) {
+	rb := new(AmqpBeat)
 	b := beat.NewBeat("", "", rb)
 	b.Events = &MockClient{beat: rb,
-		eventPublished: func(event common.MapStr, beat *RabbitBeat) {
+		eventPublished: func(event common.MapStr, beat *AmqpBeat) {
 		},
 	}
 	rb.ConfigWithFile(b, cfgFile)
@@ -188,9 +188,9 @@ func (p *Publisher) send(msg string) {
 }
 
 type MockClient struct {
-	beat            *RabbitBeat
-	eventPublished  func(event common.MapStr, beat *RabbitBeat)
-	eventsPublished func(event []common.MapStr, beat *RabbitBeat)
+	beat            *AmqpBeat
+	eventPublished  func(event common.MapStr, beat *AmqpBeat)
+	eventsPublished func(event []common.MapStr, beat *AmqpBeat)
 	lastReceived    time.Time
 }
 

@@ -1,6 +1,6 @@
 ################### Filebeat Configuration Example #########################
 
-############################# rabbitbeat ######################################
+############################# amqpbeat ######################################
 amqpinput:
   serveruri: "amqp://guest:guest@localhost:5672/"
 
@@ -52,7 +52,7 @@ output:
     # The number of seconds to wait for new events between two bulk API index requests.
     # If `bulk_max_size` is reached before this interval expires, addition bulk index
     # requests are made.
-    flush_interval: 1 
+    flush_interval: 60 
 
     # tls configuration
     #tls:
@@ -111,12 +111,12 @@ shipper:
   # The name of the shipper that publishes the network data. It can be used to group
   # all the transactions sent by a single shipper in the web interface.
   # If this options is not defined, the hostname is used.
-  name: melllvar
+  name: amqpbeat
 
   # The tags of the shipper are included in their own field with each
   # transaction published. Tags make it easy to group servers by different
   # logical properties.
-  tags: [ "melllvar", "0.01" ]
+  tags: [ "amqpbeat", "1.0.0-alpha" ]
 
   # Uncomment the following if you want to ignore transactions created
   # by the server on which the shipper is installed. This option is useful
