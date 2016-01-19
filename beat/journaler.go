@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
+
+	"github.com/elastic/libbeat/logp"
 )
 
 const (
@@ -36,11 +39,11 @@ type emitter struct {
 }
 
 func (e *emitter) add(event []byte) {
-	append(e.queuedEvents, event)
+	e.queuedEvents = append(e.queuedEvents, event)
 }
 
 func (e *emitter) sendAll() {
-	for event := range e.queuedEvents {
+	for _, event := range e.queuedEvents {
 		e.output <- event
 	}
 }
@@ -50,23 +53,32 @@ func NewJournal(maxFileSizeBytes int, journalDir string) (*Journaler, error) {
 		journalDir:       journalDir,
 		maxFileSizeBytes: maxFileSizeBytes,
 		curFileSizeBytes: 0,
-		blockSize:        2,
+		bufferSizeBlocks: 2,
 	}
 
-	j.openNewFile()
+	err := j.openNewFile()
 
 	if err != nil {
-		return _, err
+		return nil, err
 	}
 
 	return j, nil
 }
 
-func (j *Journaler) openNewFile() {
-	j.writer, err = os.OpenFile(j.genFName(),
+func (j *Journaler) openNewFile() error {
+	writer, err := os.OpenFile(j.genFileName(),
 		os.O_WRONLY|os.O_APPEND|os.O_CREATE|os.O_SYNC,
 		0660)
+
+	j.writer = writer
+
+	if err != nil {
+		return err
+	}
+
 	j.buffer = bufio.NewWriter(j.writer)
+
+	return nil
 }
 
 func (j *Journaler) Close() {
@@ -86,15 +98,14 @@ func (j *Journaler) Close() {
 // Note that Run expects to be the only producer to 'out', and will close it
 // on error.
 //
-func (j *Journaler) Run(in <-chan []byte, out chan<- []byte) error {
-	emitter := *emitter{
+func (j *Journaler) Run(input <-chan []byte, out chan<- []byte) error {
+	emitter := &emitter{
 		queuedEvents: make([][]byte, 128, 128),
-		queuedBytes:  0,
 		output:       out,
 	}
 
-	for d := range in {
-		if j.curFileSizeBytes > j.maxJournalBytes {
+	for d := range input {
+		if j.curFileSizeBytes > j.maxFileSizeBytes {
 			j.Close()
 			j.openNewFile()
 		}
@@ -103,8 +114,9 @@ func (j *Journaler) Run(in <-chan []byte, out chan<- []byte) error {
 
 		// We don't have enough room in the buffer, so flush, sync and send
 		if len(d) > j.buffer.Available() {
-			flushErr := nil
+			var flushErr error
 			for flushErr == nil || flushErr == io.ErrShortWrite {
+				logp.Warn(flushErr.Error())
 				flushErr = j.buffer.Flush()
 			}
 
@@ -113,9 +125,11 @@ func (j *Journaler) Run(in <-chan []byte, out chan<- []byte) error {
 				return flushErr
 			}
 
+			logp.Debug("", "Emitting %d queued messages", len(emitter.queuedEvents))
 			emitter.sendAll()
 		}
 
+		// Now that we've made room (if necessary), add the next event
 		emitter.add(d)
 		j.buffer.Write(d)
 	}
@@ -123,10 +137,10 @@ func (j *Journaler) Run(in <-chan []byte, out chan<- []byte) error {
 	j.Close()
 	emitter.sendAll()
 
-	return err
+	return nil
 }
 
-func (j *Journaler) genFName() string {
-	fname := fmt.SPrintf("amqpbeat.%s.journal.log", string(time.Now().Unix()))
-	return j.journalDir + os.PathSeparator + fname
+func (j *Journaler) genFileName() string {
+	fname := fmt.Sprintf("amqpbeat.%s.journal.log", string(time.Now().Unix()))
+	return filepath.Join(j.journalDir, fname)
 }
