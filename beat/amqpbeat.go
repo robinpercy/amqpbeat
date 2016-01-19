@@ -76,7 +76,17 @@ func (rb *AmqpBeat) Run(b *beat.Beat) error {
 		go rb.consumeIntoStream(events, ch, &cfg, &wg)
 	}
 
-	go publishStream(events, b.Events)
+	persistedEvents := make(chan *TaggedDelivery)
+	go publishStream(persistedEvents, b.Events)
+	// TODO: move params to config
+	journaler, err := NewJournal(20*1024*1024, "/tmp/amqpbeat/journal")
+	if err != nil {
+		rb.Stop()
+		return err
+	}
+
+	go journaler.Run((<-chan *TaggedDelivery)(events),
+		(chan<- *TaggedDelivery)(persistedEvents))
 	wg.Wait()
 
 	return nil

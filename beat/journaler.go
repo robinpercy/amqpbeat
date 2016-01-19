@@ -34,11 +34,11 @@ type Journaler struct {
 }
 
 type emitter struct {
-	queuedEvents [][]byte
-	output       chan<- []byte
+	queuedEvents []*TaggedDelivery
+	output       chan<- *TaggedDelivery
 }
 
-func (e *emitter) add(event []byte) {
+func (e *emitter) add(event *TaggedDelivery) {
 	e.queuedEvents = append(e.queuedEvents, event)
 }
 
@@ -95,12 +95,15 @@ func (j *Journaler) Close() {
 // underlying, synchronous, file handle. Being syncrhonous, we know
 // that when the flush returns, our data has been persisted
 //
-// Note that Run expects to be the only producer to 'out', and will close it
+// Note that Run expects to be the only producer to 'out', and will close i t
 // on error.
 //
-func (j *Journaler) Run(input <-chan []byte, out chan<- []byte) error {
+// TODO: put a time limit on the buffer (or use the time limit from the
+//       shipper)
+//
+func (j *Journaler) Run(input <-chan *TaggedDelivery, out chan<- *TaggedDelivery) error {
 	emitter := &emitter{
-		queuedEvents: make([][]byte, 128, 128),
+		queuedEvents: make([]*TaggedDelivery, 128, 128),
 		output:       out,
 	}
 
@@ -113,7 +116,7 @@ func (j *Journaler) Run(input <-chan []byte, out chan<- []byte) error {
 		// TODO: compress the data going to disk
 
 		// We don't have enough room in the buffer, so flush, sync and send
-		if len(d) > j.buffer.Available() {
+		if len(d.delivery.Body) > j.buffer.Available() {
 			var flushErr error
 			for flushErr == nil || flushErr == io.ErrShortWrite {
 				logp.Warn(flushErr.Error())
@@ -131,7 +134,8 @@ func (j *Journaler) Run(input <-chan []byte, out chan<- []byte) error {
 
 		// Now that we've made room (if necessary), add the next event
 		emitter.add(d)
-		j.buffer.Write(d)
+		// TODO: add TagType as well?
+		j.buffer.Write(d.delivery.Body)
 	}
 
 	j.Close()
