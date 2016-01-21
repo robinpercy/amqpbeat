@@ -2,3 +2,7 @@ amqpinput:
   serveruri: "amqp://guest:guest@localhost:5672/"
   channels:
     - name: "test"
+
+logging:
+  selectors: []
+  level: debug

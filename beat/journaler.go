@@ -29,8 +29,12 @@ type Journaler struct {
 	bufferSizeBlocks int
 	maxFileSizeBytes int
 	curFileSizeBytes int
+	maxDelay         time.Duration
 	writer           *os.File
 	buffer           *bufio.Writer
+	timer            *time.Timer
+	emitter          *emitter
+	Out              chan *TaggedDelivery
 }
 
 type emitter struct {
@@ -43,17 +47,34 @@ func (e *emitter) add(event *TaggedDelivery) {
 }
 
 func (e *emitter) sendAll() {
+	logp.Debug("", "Emitting %d queued messages", len(e.queuedEvents))
 	for _, event := range e.queuedEvents {
 		e.output <- event
 	}
 }
 
+func (e *emitter) close() {
+	close(e.output)
+}
+
 func NewJournal(maxFileSizeBytes int, journalDir string) (*Journaler, error) {
+
+	out := make(chan *TaggedDelivery)
+	emitter := &emitter{
+		queuedEvents: make([]*TaggedDelivery, 128, 128),
+		output:       out,
+	}
+	maxDelay := time.Duration(5000) * time.Millisecond
+
 	j := &Journaler{
 		journalDir:       journalDir,
 		maxFileSizeBytes: maxFileSizeBytes,
 		curFileSizeBytes: 0,
 		bufferSizeBlocks: 2,
+		maxDelay:         maxDelay,
+		timer:            time.NewTimer(maxDelay),
+		emitter:          emitter,
+		Out:              out,
 	}
 
 	err := j.openNewFile()
@@ -82,66 +103,85 @@ func (j *Journaler) openNewFile() error {
 }
 
 func (j *Journaler) Close() {
-	j.buffer.Flush()
-	j.writer.Close()
+	defer j.emitter.close()
+	defer j.emitter.sendAll()
+	defer j.writer.Close()
+	defer j.buffer.Flush()
 }
 
-// Run ranges over the inbound events maintaining two buffers: one for the
-// representations to be written to disk, and the other for the unmodified
-// events to be forwarded on to the out channel, once they have been
-// written to disk.
-//
-// Once the I/O buffer is full, it is flushed, which writes it to the
-// underlying, synchronous, file handle. Being syncrhonous, we know
-// that when the flush returns, our data has been persisted
-//
-// Note that Run expects to be the only producer to 'out', and will close i t
-// on error.
-//
-// TODO: put a time limit on the buffer (or use the time limit from the
-//       shipper)
-//
-func (j *Journaler) Run(input <-chan *TaggedDelivery, out chan<- *TaggedDelivery) error {
-	emitter := &emitter{
-		queuedEvents: make([]*TaggedDelivery, 128, 128),
-		output:       out,
-	}
+// Run ranges over input, buffering the journal until the buffer is full,
+// or the maxDelay time has exceeded.  Either condition will cause the
+// the journal to be flushed to disk and the journaled deliveries to
+// be published to the j.Out channel
+func (j *Journaler) Run(input <-chan *TaggedDelivery) error {
 
-	for d := range input {
-		if j.curFileSizeBytes > j.maxFileSizeBytes {
-			j.Close()
-			j.openNewFile()
+	var err error
+	for {
+
+		// For an event, we may or may not want to flush the buffer, depending
+		// on whether the buffer is out of space. Whereas on receiving a timer
+		// event, we always need to flush the buffer.
+		select {
+		case d := <-input:
+			err = j.processEvent(d)
+		case <-j.timer.C:
+			err = j.flush()
 		}
 
-		// TODO: compress the data going to disk
-
-		// We don't have enough room in the buffer, so flush, sync and send
-		if len(d.delivery.Body) > j.buffer.Available() {
-			var flushErr error
-			for flushErr == nil || flushErr == io.ErrShortWrite {
-				logp.Warn(flushErr.Error())
-				flushErr = j.buffer.Flush()
-			}
-
-			if flushErr != nil {
-				close(out)
-				return flushErr
-			}
-
-			logp.Debug("", "Emitting %d queued messages", len(emitter.queuedEvents))
-			emitter.sendAll()
+		if err != nil {
+			return err
 		}
+	}
+}
 
-		// Now that we've made room (if necessary), add the next event
-		emitter.add(d)
-		// TODO: add TagType as well?
-		j.buffer.Write(d.delivery.Body)
+func (j *Journaler) processEvent(d *TaggedDelivery) error {
+	if j.curFileSizeBytes > j.maxFileSizeBytes {
+		// Rollover journal file
+		j.Close()
+		j.openNewFile()
 	}
 
-	j.Close()
-	emitter.sendAll()
+	// We don't have enough room in the buffer, so flush, sync and send
+	if len(d.delivery.Body) > j.buffer.Available() {
+		err := j.flush()
+
+		if err != nil {
+			return err
+		}
+	}
+
+	// Now that we've made room (if necessary), add the next event
+	j.emitter.add(d)
+	// TODO: add TagType as well?
+	// TODO: compress the data going to disk, will require modifying the
+	//       buffer.Available() check above
+	j.buffer.Write(d.delivery.Body)
 
 	return nil
+}
+
+func (j *Journaler) flush() error {
+	var flushErr error
+	for j.buffer.Buffered() > 0 &&
+		(flushErr == nil || flushErr == io.ErrShortWrite) {
+
+		logp.Warn(flushErr.Error())
+		flushErr = j.buffer.Flush()
+	}
+
+	if flushErr != nil {
+		j.emitter.close()
+		return flushErr
+	}
+
+	j.emitter.sendAll()
+	j.resetTimer()
+
+	return nil
+}
+
+func (j *Journaler) resetTimer() {
+	j.timer.Reset(j.maxDelay)
 }
 
 func (j *Journaler) genFileName() string {
