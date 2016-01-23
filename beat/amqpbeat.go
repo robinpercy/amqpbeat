@@ -74,19 +74,43 @@ func (rb *AmqpBeat) Run(b *beat.Beat) error {
 		cfg := c
 		go rb.consumeIntoStream(events, ch, &cfg, &wg)
 	}
+	fmt.Println("Running3")
+
+	/*
+		ch2 := make(chan *TaggedDelivery)
+
+		go func() {
+			for {
+				select {
+				case td, more := <-events:
+					if more {
+						ch2 <- td
+					} else {
+						return
+					}
+				case <-rb.stop:
+					fmt.Println("CLOSING ch2")
+					close(ch2)
+					return
+				}
+			}
+		}()
+	*/
 
 	// TODO: move params to config
-	// journaler, err := NewJournal(20*1024*1024, "/tmp/amqpbeat/journal")
-	//
-	// if err != nil {
-	// 	rb.Stop()
-	// 	return err
-	// }
+	journaler, err := NewJournal(20*1024*1024, "/tmp/amqpbeat/journal")
 
-	//	go publishStream(journaler.Out, b.Events)
+	if err != nil {
+		fmt.Println("Calling stop because journaler failed to init: %s", err.Error())
+		rb.Stop()
+		return err
+	}
 
-	//	go journaler.Run((<-chan *TaggedDelivery)(events))
-	go publishStream(events, b.Events)
+	fmt.Println("Running journaler")
+	go journaler.Run((<-chan *TaggedDelivery)(events), rb.stop)
+	go publishStream(journaler.Out, b.Events)
+
+	//go publishStream(ch2, b.Events)
 
 	wg.Wait()
 
@@ -95,7 +119,6 @@ func (rb *AmqpBeat) Run(b *beat.Beat) error {
 
 func (rb *AmqpBeat) consumeIntoStream(stream chan<- *TaggedDelivery, ch *amqp.Channel, c *ChannelConfig, wg *sync.WaitGroup) {
 	defer wg.Done()
-	fmt.Println("Consuming into %s", *c.Name)
 
 	_, err := ch.QueueDeclare(*c.Name, *c.Durable, *c.AutoDelete, false, false, *c.Args)
 	if err != nil {
@@ -153,7 +176,7 @@ func (rb *AmqpBeat) Cleanup(b *beat.Beat) error {
 
 func (rb *AmqpBeat) Stop() {
 	if rb.stop != nil {
-		fmt.Print("STOPPING")
+		fmt.Println("STOPPING")
 		close(rb.stop)
 	}
 }

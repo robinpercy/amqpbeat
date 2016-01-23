@@ -113,25 +113,46 @@ func (j *Journaler) Close() {
 // or the maxDelay time has exceeded.  Either condition will cause the
 // the journal to be flushed to disk and the journaled deliveries to
 // be published to the j.Out channel
-func (j *Journaler) Run(input <-chan *TaggedDelivery) error {
+func (j *Journaler) Run(input <-chan *TaggedDelivery, stop chan interface{}) error {
 
-	var err error
-	for {
+	/*
+		var err error
+		for {
 
-		// For an event, we may or may not want to flush the buffer, depending
-		// on whether the buffer is out of space. Whereas on receiving a timer
-		// event, we always need to flush the buffer.
-		select {
-		case d := <-input:
-			err = j.processEvent(d)
-		case <-j.timer.C:
-			err = j.flush()
+			// For an event, we may or may not want to flush the buffer, depending
+			// on whether the buffer is out of space. Whereas on receiving a timer
+			// event, we always need to flush the buffer.
+			select {
+			case d := <-input:
+				err = j.processEvent(d)
+			case <-j.timer.C:
+				err = j.flush()
+			}
+
+			if err != nil {
+				return err
+			}
 		}
+	*/
 
-		if err != nil {
-			return err
+	go func() {
+		for {
+			select {
+			case td, more := <-input:
+				if more {
+					j.Out <- td
+				} else {
+					close(j.Out)
+					return
+				}
+			case <-stop:
+				fmt.Println("STOPPING JOURNALER")
+				close(j.Out)
+				return
+			}
 		}
-	}
+	}()
+	return nil
 }
 
 func (j *Journaler) processEvent(d *TaggedDelivery) error {
@@ -185,6 +206,6 @@ func (j *Journaler) resetTimer() {
 }
 
 func (j *Journaler) genFileName() string {
-	fname := fmt.Sprintf("amqpbeat.%s.journal.log", string(time.Now().Unix()))
+	fname := fmt.Sprintf("amqpbeat.%d.journal.log", time.Now().UnixNano())
 	return filepath.Join(j.journalDir, fname)
 }

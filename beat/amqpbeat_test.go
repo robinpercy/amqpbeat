@@ -23,7 +23,8 @@ func TestCanStartAndStopBeat(t *testing.T) {
 		wg.Done()
 	}()
 
-	time.AfterFunc(time.Second, func() {
+	time.AfterFunc(5*time.Second, func() {
+		fmt.Println("Calling stop because test timed out")
 		rb.Stop()
 	})
 	wg.Wait()
