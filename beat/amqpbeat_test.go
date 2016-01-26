@@ -23,7 +23,7 @@ func TestCanStartAndStopBeat(t *testing.T) {
 		wg.Done()
 	}()
 
-	time.AfterFunc(5*time.Second, func() {
+	time.AfterFunc(1*time.Second, func() {
 		fmt.Println("Calling stop because test timed out")
 		rb.Stop()
 	})
@@ -50,16 +50,12 @@ func TestCanReceiveMessage(t *testing.T) {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
-	exitTest := func() {
-		rb.Stop()
-		wg.Done()
-	}
-
 	b.Events = &MockClient{beat: rb,
 		eventPublished: func(event common.MapStr, beat *AmqpBeat) {
 			received = true
 			assert.Equal(t, expected, event["payload"])
-			exitTest()
+			fmt.Println("Exiting test")
+			wg.Done()
 		},
 	}
 
@@ -67,6 +63,7 @@ func TestCanReceiveMessage(t *testing.T) {
 	pub.send(test)
 
 	wg.Wait()
+	rb.Stop()
 	assert.True(t, received, "Did not receive message")
 }
 
@@ -87,29 +84,40 @@ func TestCanReceiveOnMultipleQueues(t *testing.T) {
 			defer pub.close()
 		}
 		pubs[i] = pub
-		ch.QueuePurge(*cfg.Name, true)
 	}
 
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
-	exitTest := func() {
+
+	msgPerQueue := 1000
+	received := make(chan string)
+	totalMsgs := msgPerQueue * len(pubs)
+
+	go func() {
+		counts := make(map[string]int)
+		i := 0
+		for c := range received {
+			i++
+			counts[c]++
+			if i == totalMsgs {
+				break
+			}
+		}
+
+		for i := 0; i < len(pubs); i++ {
+			assert.Equal(t, msgPerQueue, counts[pubs[i].typeTag], "Did not receive all messages for publisher")
+		}
+		fmt.Println("Received all expected messages")
+
 		rb.Stop()
 		wg.Done()
-	}
-
-	counts := make(map[string]int)
-	msgPerQueue := 100
-	totalMsgs := msgPerQueue * len(pubs)
-	received := 0
+	}()
 
 	b.Events = &MockClient{beat: rb,
 		eventPublished: func(event common.MapStr, beat *AmqpBeat) {
-			received += 1
-			counts[event["type"].(string)] += 1
+			tstr := event["type"].(string)
 			assert.Equal(t, expected, event["payload"])
-			if received == totalMsgs {
-				exitTest()
-			}
+			received <- tstr
 		},
 	}
 
@@ -120,9 +128,7 @@ func TestCanReceiveOnMultipleQueues(t *testing.T) {
 	}
 
 	wg.Wait()
-	for i := 0; i < len(pubs); i++ {
-		assert.Equal(t, msgPerQueue, counts[pubs[i].typeTag], "Did not receive all messages for publisher")
-	}
+
 }
 
 func helpBuildBeat(cfgFile string) (*AmqpBeat, *beat.Beat) {
@@ -166,6 +172,7 @@ func newPublisher(serverURI string, cfg *ChannelConfig, ch *amqp.Channel) *Publi
 	}
 
 	_, err = ch.QueueDeclare(*cfg.Name, *cfg.Durable, *cfg.AutoDelete, *cfg.Exclusive, false, *cfg.Args)
+	ch.QueuePurge(*cfg.Name, true)
 
 	utils.FailOnError(err, fmt.Sprintf("Failed to declare queue %s", cfg.Name))
 	return &Publisher{exch: "", routingKey: *cfg.Name, conn: conn, ch: ch, typeTag: *cfg.TypeTag}
@@ -193,6 +200,7 @@ type MockClient struct {
 	eventPublished  func(event common.MapStr, beat *AmqpBeat)
 	eventsPublished func(event []common.MapStr, beat *AmqpBeat)
 	lastReceived    time.Time
+	msgsReceived    int
 }
 
 func (c MockClient) PublishEvent(event common.MapStr, opts ...publisher.ClientOption) bool {

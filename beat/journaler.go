@@ -47,10 +47,15 @@ func (e *emitter) add(event *TaggedDelivery) {
 }
 
 func (e *emitter) sendAll() {
+	fmt.Printf("Emitting events: %d\n", len(e.queuedEvents))
 	logp.Debug("", "Emitting %d queued messages", len(e.queuedEvents))
 	for _, event := range e.queuedEvents {
+		//fmt.Printf("event = %v:%v\n", event, i)
 		e.output <- event
 	}
+
+	e.queuedEvents = make([]*TaggedDelivery, 0, len(e.queuedEvents))
+
 }
 
 func (e *emitter) close() {
@@ -61,7 +66,7 @@ func NewJournal(maxFileSizeBytes int, journalDir string) (*Journaler, error) {
 
 	out := make(chan *TaggedDelivery)
 	emitter := &emitter{
-		queuedEvents: make([]*TaggedDelivery, 128, 128),
+		queuedEvents: make([]*TaggedDelivery, 0, 128),
 		output:       out,
 	}
 	maxDelay := time.Duration(5000) * time.Millisecond
@@ -113,46 +118,50 @@ func (j *Journaler) Close() {
 // or the maxDelay time has exceeded.  Either condition will cause the
 // the journal to be flushed to disk and the journaled deliveries to
 // be published to the j.Out channel
-func (j *Journaler) Run(input <-chan *TaggedDelivery, stop chan interface{}) error {
+func (j *Journaler) Run(input <-chan *TaggedDelivery, stop chan interface{}) {
+
+	var err error
+
+loop:
+	for {
+
+		// For an event, we may or may not want to flush the buffer, depending
+		// on whether the buffer is out of space. Whereas on receiving a timer
+		// event, we always need to flush the buffer.
+		select {
+		case d := <-input:
+			//fmt.Printf("processing event: %v\n", d)
+			err = j.processEvent(d)
+		case <-j.timer.C:
+			err = j.flush()
+		case <-stop:
+			break loop
+		}
+
+		if err != nil {
+			panic(err)
+		}
+	}
 
 	/*
-		var err error
-		for {
-
-			// For an event, we may or may not want to flush the buffer, depending
-			// on whether the buffer is out of space. Whereas on receiving a timer
-			// event, we always need to flush the buffer.
-			select {
-			case d := <-input:
-				err = j.processEvent(d)
-			case <-j.timer.C:
-				err = j.flush()
-			}
-
-			if err != nil {
-				return err
-			}
-		}
-	*/
-
-	go func() {
-		for {
-			select {
-			case td, more := <-input:
-				if more {
-					j.Out <- td
-				} else {
+		go func() {
+			for {
+				select {
+				case td, more := <-input:
+					if more {
+						j.Out <- td
+					} else {
+						close(j.Out)
+						return
+					}
+				case <-stop:
+					fmt.Println("STOPPING JOURNALER")
 					close(j.Out)
 					return
 				}
-			case <-stop:
-				fmt.Println("STOPPING JOURNALER")
-				close(j.Out)
-				return
 			}
-		}
-	}()
-	return nil
+		}()
+	*/
 }
 
 func (j *Journaler) processEvent(d *TaggedDelivery) error {
@@ -186,7 +195,9 @@ func (j *Journaler) flush() error {
 	for j.buffer.Buffered() > 0 &&
 		(flushErr == nil || flushErr == io.ErrShortWrite) {
 
-		logp.Warn(flushErr.Error())
+		if flushErr != nil {
+			logp.Warn(flushErr.Error())
+		}
 		flushErr = j.buffer.Flush()
 	}
 
