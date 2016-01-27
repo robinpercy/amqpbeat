@@ -2,7 +2,6 @@ package beat
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 
@@ -15,8 +14,9 @@ import (
 )
 
 type AmqpBeat struct {
-	RbConfig Settings
-	stop     chan interface{}
+	RbConfig  Settings
+	journaler *Journaler
+	stop      chan interface{}
 }
 
 func (rb *AmqpBeat) Config(b *beat.Beat) error {
@@ -36,6 +36,14 @@ func (rb *AmqpBeat) ConfigWithFile(b *beat.Beat, filePath string) error {
 
 func (rb *AmqpBeat) Setup(b *beat.Beat) error {
 	rb.stop = make(chan interface{})
+
+	var err error
+	rb.journaler, err = NewJournaler(rb.RbConfig.AmqpInput.Journal)
+
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -74,41 +82,9 @@ func (rb *AmqpBeat) Run(b *beat.Beat) error {
 		cfg := c
 		go rb.consumeIntoStream(events, ch, &cfg, &wg)
 	}
-	fmt.Println("Running3")
 
-	/*
-		ch2 := make(chan *TaggedDelivery)
-
-		go func() {
-			for {
-				select {
-				case td, more := <-events:
-					if more {
-						ch2 <- td
-					} else {
-						return
-					}
-				case <-rb.stop:
-					fmt.Println("CLOSING ch2")
-					close(ch2)
-					return
-				}
-			}
-		}()
-	*/
-
-	// TODO: move params to config
-	journaler, err := NewJournal(20*1024*1024, "/tmp/amqpbeat/journal")
-
-	if err != nil {
-		fmt.Println("Calling stop because journaler failed to init: %s", err.Error())
-		rb.Stop()
-		return err
-	}
-
-	fmt.Println("Running journaler")
-	go journaler.Run((<-chan *TaggedDelivery)(events), rb.stop)
-	go publishStream(journaler.Out, b.Events)
+	go rb.journaler.Run((<-chan *TaggedDelivery)(events), rb.stop)
+	go publishStream(rb.journaler.Out, b.Events)
 
 	//go publishStream(ch2, b.Events)
 
@@ -176,7 +152,7 @@ func (rb *AmqpBeat) Cleanup(b *beat.Beat) error {
 
 func (rb *AmqpBeat) Stop() {
 	if rb.stop != nil {
-		fmt.Println("STOPPING")
+		logp.Info("Stopping beat")
 		close(rb.stop)
 	}
 }

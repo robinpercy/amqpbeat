@@ -47,10 +47,8 @@ func (e *emitter) add(event *TaggedDelivery) {
 }
 
 func (e *emitter) sendAll() {
-	fmt.Printf("Emitting events: %d\n", len(e.queuedEvents))
 	logp.Debug("", "Emitting %d queued messages", len(e.queuedEvents))
 	for _, event := range e.queuedEvents {
-		//fmt.Printf("event = %v:%v\n", event, i)
 		e.output <- event
 	}
 
@@ -62,21 +60,21 @@ func (e *emitter) close() {
 	close(e.output)
 }
 
-func NewJournal(maxFileSizeBytes int, journalDir string) (*Journaler, error) {
+func NewJournaler(cfg *JournalerConfig) (*Journaler, error) {
 
 	out := make(chan *TaggedDelivery)
 	emitter := &emitter{
 		queuedEvents: make([]*TaggedDelivery, 0, 128),
 		output:       out,
 	}
-	maxDelay := time.Duration(5000) * time.Millisecond
+	maxDelay := time.Duration(1000) * time.Millisecond
 
 	j := &Journaler{
-		journalDir:       journalDir,
-		maxFileSizeBytes: maxFileSizeBytes,
+		journalDir:       *cfg.JournalDir,
+		maxFileSizeBytes: *cfg.MaxFileSizeBytes,
 		curFileSizeBytes: 0,
-		bufferSizeBlocks: 2,
-		maxDelay:         maxDelay,
+		bufferSizeBlocks: *cfg.BufferSizeBlocks,
+		maxDelay:         time.Duration(*cfg.MaxDelayMs) * time.Millisecond,
 		timer:            time.NewTimer(maxDelay),
 		emitter:          emitter,
 		Out:              out,
@@ -124,13 +122,11 @@ func (j *Journaler) Run(input <-chan *TaggedDelivery, stop chan interface{}) {
 
 loop:
 	for {
-
 		// For an event, we may or may not want to flush the buffer, depending
 		// on whether the buffer is out of space. Whereas on receiving a timer
 		// event, we always need to flush the buffer.
 		select {
 		case d := <-input:
-			//fmt.Printf("processing event: %v\n", d)
 			err = j.processEvent(d)
 		case <-j.timer.C:
 			err = j.flush()
@@ -142,26 +138,6 @@ loop:
 			panic(err)
 		}
 	}
-
-	/*
-		go func() {
-			for {
-				select {
-				case td, more := <-input:
-					if more {
-						j.Out <- td
-					} else {
-						close(j.Out)
-						return
-					}
-				case <-stop:
-					fmt.Println("STOPPING JOURNALER")
-					close(j.Out)
-					return
-				}
-			}
-		}()
-	*/
 }
 
 func (j *Journaler) processEvent(d *TaggedDelivery) error {

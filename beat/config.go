@@ -7,6 +7,11 @@ import (
 )
 import "strings"
 
+const DFLT_J_DIR = "/tmp/"
+const DFLT_J_BLKS = 4
+const DFLT_J_FILE_SZ = 20 * 1024 * 1024
+const DFLT_J_DELAY = 500
+
 // ChannelConfig ...
 type ChannelConfig struct {
 	Name       *string
@@ -27,6 +32,14 @@ type ChannelConfig struct {
 type AmqpConfig struct {
 	ServerURI *string
 	Channels  *[]ChannelConfig
+	Journal   *JournalerConfig
+}
+
+type JournalerConfig struct {
+	JournalDir       *string
+	BufferSizeBlocks *int
+	MaxFileSizeBytes *int
+	MaxDelayMs       *int
 }
 
 // Settings ...
@@ -56,10 +69,39 @@ func (s *Settings) CheckRequired() ConfigError {
 	return ErrorFor(errors)
 }
 
+func (j *JournalerConfig) SetDefaults() {
+
+	if j.JournalDir == nil {
+		j.JournalDir = new(string)
+		*j.JournalDir = DFLT_J_DIR
+	}
+
+	if j.BufferSizeBlocks == nil {
+		j.BufferSizeBlocks = new(int)
+		*j.BufferSizeBlocks = DFLT_J_BLKS
+	}
+
+	if j.MaxFileSizeBytes == nil {
+		j.MaxFileSizeBytes = new(int)
+		*j.MaxFileSizeBytes = DFLT_J_FILE_SZ
+	}
+
+	if j.MaxDelayMs == nil {
+		j.MaxDelayMs = new(int)
+		*j.MaxDelayMs = DFLT_J_DELAY
+	}
+}
+
 func (s *Settings) SetDefaults() {
 	for i := range *s.AmqpInput.Channels {
 		(*s.AmqpInput.Channels)[i].SetDefaults()
 	}
+
+	if s.AmqpInput.Journal == nil {
+		s.AmqpInput.Journal = new(JournalerConfig)
+	}
+
+	s.AmqpInput.Journal.SetDefaults()
 }
 
 func (c *ChannelConfig) SetDefaults() {
