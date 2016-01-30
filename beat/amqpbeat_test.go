@@ -112,7 +112,6 @@ func (r *Runner) initPublishers() {
 }
 
 type Spec interface {
-	init()
 	numQueues() int
 	handleEvent(e common.MapStr)
 	isComplete() bool
@@ -122,7 +121,6 @@ type Spec interface {
 func (r *Runner) run() {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
-	r.spec.init()
 
 	go func() {
 		for c := range r.received {
@@ -181,79 +179,17 @@ func (test *MultiQueueTest) verify(r *Runner) {
 	}
 }
 
-func TestCanReceiveOnMultipleQueues2(t *testing.T) {
+func TestCanReceiveOnMultipleQueues(t *testing.T) {
 	r := newRunner(t, "./test_data/multi.yml")
 	defer r.cleanup()
 	test := new(MultiQueueTest)
+	test.init()
 	r.spec = test
 	testMsg := "{\"payload\": \"This is a tetst\"}"
-	for i := 0; i < 4000; i++ {
+	for i := 0; i < test.totalExpected; i++ {
 		r.pubs[i%len(r.pubs)].send(testMsg)
 	}
 	r.run()
-}
-
-func TestCanReceiveOnMultipleQueues(t *testing.T) {
-
-	expected := "This is a test"
-	test := fmt.Sprintf("{\"payload\": \"%s\"}", expected)
-
-	rb, b := helpBuildBeat("./test_data/multi.yml")
-	input := rb.RbConfig.AmqpInput
-
-	var ch *amqp.Channel
-	pubs := make([]*Publisher, len(*input.Channels))
-	for i, cfg := range *input.Channels {
-		pub := newPublisher(*input.ServerURI, &cfg, ch)
-		if pub.conn != nil {
-			ch = pub.ch
-			defer pub.close()
-		}
-		pubs[i] = pub
-	}
-
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-
-	msgPerQueue := 1000
-	received := make(chan string)
-	totalMsgs := msgPerQueue * len(pubs)
-
-	go func() {
-		counts := make(map[string]int)
-		i := 0
-		for c := range received {
-			i++
-			counts[c]++
-			if i == totalMsgs {
-				break
-			}
-		}
-
-		for i := 0; i < len(pubs); i++ {
-			assert.Equal(t, msgPerQueue, counts[pubs[i].typeTag], "Did not receive all messages for publisher")
-		}
-
-		rb.Stop()
-		wg.Done()
-	}()
-
-	b.Events = &MockClient{beat: rb,
-		eventPublished: func(event common.MapStr, beat *AmqpBeat) {
-			tstr := event["type"].(string)
-			assert.Equal(t, expected, event["payload"])
-			received <- tstr
-		},
-	}
-
-	go rb.Run(b)
-
-	for i := 0; i < totalMsgs; i++ {
-		pubs[i%len(pubs)].send(test)
-	}
-
-	wg.Wait()
-
 }
 
 func helpBuildBeat(cfgFile string) (*AmqpBeat, *beat.Beat) {
