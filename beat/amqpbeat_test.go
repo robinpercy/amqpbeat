@@ -24,7 +24,6 @@ func TestCanStartAndStopBeat(t *testing.T) {
 	}()
 
 	time.AfterFunc(1*time.Second, func() {
-		fmt.Println("Calling stop because test timed out")
 		rb.Stop()
 	})
 	wg.Wait()
@@ -54,7 +53,6 @@ func TestCanReceiveMessage(t *testing.T) {
 		eventPublished: func(event common.MapStr, beat *AmqpBeat) {
 			received = true
 			assert.Equal(t, expected, event["payload"])
-			fmt.Println("Exiting test")
 			wg.Done()
 		},
 	}
@@ -65,6 +63,134 @@ func TestCanReceiveMessage(t *testing.T) {
 	wg.Wait()
 	rb.Stop()
 	assert.True(t, received, "Did not receive message")
+}
+
+type Runner struct {
+	t        *testing.T
+	ab       *AmqpBeat
+	b        *beat.Beat
+	received chan common.MapStr
+	pubs     []*Publisher
+	pubConn  *amqp.Connection
+	spec     Spec
+}
+
+func newRunner(t *testing.T, config string) *Runner {
+	ab, b := helpBuildBeat(config)
+	r := &Runner{
+		ab:       ab,
+		b:        b,
+		received: make(chan common.MapStr),
+	}
+	r.initPublishers()
+
+	b.Events = &MockClient{beat: ab,
+		eventsPublished: func(events []common.MapStr, beat *AmqpBeat) {
+			for _, event := range events {
+				r.received <- event
+			}
+		},
+		eventPublished: func(event common.MapStr, beat *AmqpBeat) {
+			r.received <- event
+		},
+	}
+
+	return r
+}
+
+func (r *Runner) initPublishers() {
+	var ch *amqp.Channel
+	input := r.ab.RbConfig.AmqpInput
+	r.pubs = make([]*Publisher, len(*input.Channels))
+	for i, cfg := range *input.Channels {
+		pub := newPublisher(*input.ServerURI, &cfg, ch)
+		if pub.conn != nil {
+			r.pubConn = pub.conn
+		}
+		r.pubs[i] = pub
+	}
+}
+
+type Spec interface {
+	init()
+	numQueues() int
+	handleEvent(e common.MapStr)
+	isComplete() bool
+	verify(runner *Runner)
+}
+
+func (r *Runner) run() {
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	r.spec.init()
+
+	go func() {
+		for c := range r.received {
+			r.spec.handleEvent(c)
+			if r.spec.isComplete() {
+				break
+			}
+		}
+
+		r.spec.verify(r)
+		r.ab.Stop()
+		wg.Done()
+	}()
+
+	go r.ab.Run(r.b)
+
+	wg.Wait()
+
+}
+
+func (r *Runner) cleanup() error {
+	return r.pubConn.Close()
+}
+
+type MultiQueueTest struct {
+	msgPerQueue   int
+	totalExpected int
+	counts        map[string]int
+	totalReceived int
+}
+
+func (test *MultiQueueTest) init() {
+	test.msgPerQueue = 1000
+	test.totalExpected = test.msgPerQueue * test.numQueues()
+	test.counts = make(map[string]int)
+	test.totalReceived = 0
+}
+
+func (test *MultiQueueTest) numQueues() int {
+	return 4
+}
+
+func (test *MultiQueueTest) handleEvent(e common.MapStr) {
+	typeName := e["type"].(string)
+	test.counts[typeName]++
+	test.totalReceived++
+}
+
+func (test *MultiQueueTest) isComplete() bool {
+	return test.totalReceived >= test.totalExpected
+}
+
+func (test *MultiQueueTest) verify(r *Runner) {
+	for i := 0; i < len(r.pubs); i++ {
+		assert.Equal(r.t, test.msgPerQueue, test.counts[r.pubs[i].typeTag], "Did not receive all messages for publisher")
+	}
+}
+
+func TestCanReceiveOnMultipleQueues2(t *testing.T) {
+	r := newRunner(t, "./test_data/multi.yml")
+	defer r.cleanup()
+	test := new(MultiQueueTest)
+	r.spec = test
+	testMsg := "{\"payload\": \"This is a tetst\"}"
+	for i := 0; i < 4000; i++ {
+		r.pubs[i%len(r.pubs)].send(testMsg)
+	}
+	r.run()
 }
 
 func TestCanReceiveOnMultipleQueues(t *testing.T) {
@@ -107,7 +233,6 @@ func TestCanReceiveOnMultipleQueues(t *testing.T) {
 		for i := 0; i < len(pubs); i++ {
 			assert.Equal(t, msgPerQueue, counts[pubs[i].typeTag], "Did not receive all messages for publisher")
 		}
-		fmt.Println("Received all expected messages")
 
 		rb.Stop()
 		wg.Done()
