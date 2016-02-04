@@ -29,6 +29,7 @@ func (rb *AmqpBeat) ConfigWithFile(b *beat.Beat, filePath string) error {
 		logp.Err("Error reading configuration file:'%s' %v", filePath, err)
 		return err
 	}
+
 	rb.RbConfig.CheckRequired()
 	rb.RbConfig.SetDefaults()
 	return nil

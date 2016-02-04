@@ -1,11 +1,13 @@
 amqpinput:
   serveruri: "amqp://guest:guest@localhost:5672/"
-  dryrun: true
-  maxdryrunmsgs: 10
 
   channels:
     - name: "test"
       required: true
+      durable: false
+      autodelete: false
+
+      # These are not yet implemented
       maxbatchsize: 100
       minintervalms: 100
       maxintervalms: 1000

@@ -12,36 +12,6 @@ const DFLT_J_BLKS = 4
 const DFLT_J_FILE_SZ = 20 * 1024 * 1024
 const DFLT_J_DELAY = 500
 
-// ChannelConfig ...
-type ChannelConfig struct {
-	Name       *string
-	Required   *bool
-	Durable    *bool
-	AutoDelete *bool
-	Exclusive  *bool
-	// TODO support args
-	Args              *amqp.Table
-	MaxBatchSize      *int
-	MaxIntervalMS     *int
-	MinIntervalMS     *int
-	MaxMessagesPerSec *int
-	TypeTag           *string
-}
-
-// AmqpConfig ...
-type AmqpConfig struct {
-	ServerURI *string
-	Channels  *[]ChannelConfig
-	Journal   *JournalerConfig
-}
-
-type JournalerConfig struct {
-	JournalDir       *string
-	BufferSizeBlocks *int
-	MaxFileSizeBytes *int
-	MaxDelayMs       *int
-}
-
 // Settings ...
 type Settings struct {
 	AmqpInput *AmqpConfig
@@ -57,16 +27,51 @@ func (s *Settings) CheckRequired() ConfigError {
 		return ErrorFor(errors)
 	}
 
-	input := s.AmqpInput
-	if input.Channels == nil || len(*input.Channels) == 0 {
-		errors.missing("channels")
-	} else {
-		for _, c := range *input.Channels {
-			c.CheckRequired(errors)
-		}
+	inputErrors := s.AmqpInput.CheckRequired()
+
+	for k, v := range inputErrors.ErrorMap {
+		errors[k] = v
 	}
 
 	return ErrorFor(errors)
+}
+
+func (s *Settings) SetDefaults() {
+	for i := range *s.AmqpInput.Channels {
+		(*s.AmqpInput.Channels)[i].SetDefaults()
+	}
+
+	if s.AmqpInput.Journal == nil {
+		s.AmqpInput.Journal = new(JournalerConfig)
+	}
+
+	s.AmqpInput.Journal.SetDefaults()
+}
+
+// AmqpConfig ...
+type AmqpConfig struct {
+	ServerURI *string
+	Channels  *[]ChannelConfig
+	Journal   *JournalerConfig
+}
+
+func (a *AmqpConfig) CheckRequired() ConfigError {
+	errors := make(errorMap)
+	if a.Channels == nil || len(*a.Channels) == 0 {
+		errors.missing("channels")
+	} else {
+		for _, c := range *a.Channels {
+			c.CheckRequired(errors)
+		}
+	}
+	return ErrorFor(errors)
+}
+
+type JournalerConfig struct {
+	JournalDir       *string
+	BufferSizeBlocks *int
+	MaxFileSizeBytes *int
+	MaxDelayMs       *int
 }
 
 func (j *JournalerConfig) SetDefaults() {
@@ -92,16 +97,19 @@ func (j *JournalerConfig) SetDefaults() {
 	}
 }
 
-func (s *Settings) SetDefaults() {
-	for i := range *s.AmqpInput.Channels {
-		(*s.AmqpInput.Channels)[i].SetDefaults()
-	}
-
-	if s.AmqpInput.Journal == nil {
-		s.AmqpInput.Journal = new(JournalerConfig)
-	}
-
-	s.AmqpInput.Journal.SetDefaults()
+// ChannelConfig ...
+type ChannelConfig struct {
+	Name              *string
+	Required          *bool
+	Durable           *bool
+	AutoDelete        *bool
+	Exclusive         *bool
+	Args              *amqp.Table
+	MaxBatchSize      *int
+	MaxIntervalMS     *int
+	MinIntervalMS     *int
+	MaxMessagesPerSec *int
+	TypeTag           *string
 }
 
 func (c *ChannelConfig) SetDefaults() {

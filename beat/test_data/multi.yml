@@ -1,7 +1,6 @@
 amqpinput:
   serveruri: "amqp://guest:guest@localhost:5672/"
   dryrun: true
-  maxdryrunmsgs: 10
 
   journal:
       journaldir: "/tmp/amqpbeat/journal"
@@ -13,34 +12,18 @@ amqpinput:
     - name: "testA"
       typetag: "A"
       required: true
-      maxbatchsize: 100
-      minintervalms: 100
-      maxintervalms: 1000
-      maxmessagespersec: 10
 
     - name: "testB"
       typetag: "B"
       required: true
-      maxbatchsize: 100
-      minintervalms: 100
-      maxintervalms: 1000
-      maxmessagespersec: 10
 
     - name: "testC"
       typetag: "C"
       required: true
-      maxbatchsize: 100
-      minintervalms: 100
-      maxintervalms: 1000
-      maxmessagespersec: 10
 
     - name: "testD"
       typetag: "D"
       required: true
-      maxbatchsize: 100
-      minintervalms: 100
-      maxintervalms: 1000
-      maxmessagespersec: 10
 
 ############################# Output ##########################################
 
