@@ -50,9 +50,9 @@ func TestCanReceiveMessage(t *testing.T) {
 	wg.Add(1)
 
 	b.Events = &MockClient{beat: rb,
-		eventPublished: func(event common.MapStr, beat *AmqpBeat) {
+		eventsPublished: func(events[]common.MapStr, beat *AmqpBeat) {
 			received = true
-			assert.Equal(t, expected, event["payload"])
+			assert.Equal(t, expected, events[0]["payload"])
 			wg.Done()
 		},
 	}
@@ -196,7 +196,7 @@ func helpBuildBeat(cfgFile string) (*AmqpBeat, *beat.Beat) {
 	rb := new(AmqpBeat)
 	b := beat.NewBeat("", "", rb)
 	b.Events = &MockClient{beat: rb,
-		eventPublished: func(event common.MapStr, beat *AmqpBeat) {
+		eventsPublished: func(event []common.MapStr, beat *AmqpBeat) {
 		},
 	}
 	rb.ConfigWithFile(b, cfgFile)

@@ -34,12 +34,12 @@ type Journaler struct {
 	buffer           *bufio.Writer
 	timer            *time.Timer
 	emitter          *emitter
-	Out              chan *TaggedDelivery
+	Out              chan []*TaggedDelivery
 }
 
 type emitter struct {
 	queuedEvents []*TaggedDelivery
-	output       chan<- *TaggedDelivery
+	output       chan<- []*TaggedDelivery
 }
 
 func (e *emitter) add(event *TaggedDelivery) {
@@ -48,10 +48,7 @@ func (e *emitter) add(event *TaggedDelivery) {
 
 func (e *emitter) sendAll() {
 	logp.Debug("", "Emitting %d queued messages", len(e.queuedEvents))
-	for _, event := range e.queuedEvents {
-		e.output <- event
-	}
-
+	e.output <- e.queuedEvents
 	e.queuedEvents = make([]*TaggedDelivery, 0, len(e.queuedEvents))
 
 }
@@ -62,7 +59,7 @@ func (e *emitter) close() {
 
 func NewJournaler(cfg *JournalerConfig) (*Journaler, error) {
 
-	out := make(chan *TaggedDelivery)
+	out := make(chan []*TaggedDelivery)
 	emitter := &emitter{
 		queuedEvents: make([]*TaggedDelivery, 0, 128),
 		output:       out,

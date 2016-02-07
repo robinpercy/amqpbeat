@@ -125,24 +125,39 @@ type TaggedDelivery struct {
 	typeTag  *string
 }
 
-func publishStream(stream <-chan *TaggedDelivery, client publisher.Client) {
-	for td := range stream {
-		// process delivery
-		m := common.MapStr{}
-		err := json.Unmarshal(td.delivery.Body, &m)
-		if err != nil {
-			logp.Err("Error unmarshalling: %s", err)
+func publishStream(stream <-chan []*TaggedDelivery, client publisher.Client) {
+
+	for tdList := range stream {
+		events := make([]common.MapStr, 0, len(tdList))
+		sent := make([]*TaggedDelivery, 0, len(tdList))
+
+		for _, td := range tdList {
+			// process delivery
+			m := common.MapStr{}
+			err := json.Unmarshal(td.delivery.Body, &m)
+			if err != nil {
+				logp.Err("Error unmarshalling: %s", err)
+				continue
+			} else {
+				sent = append(sent, td)
+			}
+			m["@timestamp"] = common.Time(time.Now())
+			m["type"] = *td.typeTag
+			logp.Debug("", "Publishing event: %v", m)
+			events = append(events, m)
 		}
-		m["@timestamp"] = common.Time(time.Now())
-		m["type"] = *td.typeTag
-		logp.Debug("", "Publishing event: %v", m)
-		success := client.PublishEvent(m, publisher.Sync)
-		if success {
-			logp.Info("Acked event")
-			td.delivery.Ack(false)
-		} else {
-			logp.Err("Failed to publish event: %v", m)
-			td.delivery.Nack(false, true)
+
+		logp.Debug("", "Publishing %d events", len(events))
+		success := client.PublishEvents(events, publisher.Sync)
+
+		for _, td := range sent {
+			if success {
+				logp.Debug("", "Acked event")
+				td.delivery.Ack(false)
+			} else {
+				logp.Err("Failed to publish event: %v", td.delivery.Body)
+				td.delivery.Nack(false, true)
+			}
 		}
 	}
 }
