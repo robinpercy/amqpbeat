@@ -114,7 +114,6 @@ func (j *Journaler) Close() {
 // the journal to be flushed to disk and the journaled deliveries to
 // be published to the j.Out channel
 func (j *Journaler) Run(input <-chan *TaggedDelivery, stop chan interface{}) {
-
 	var err error
 
 loop:
@@ -135,6 +134,7 @@ loop:
 			panic(err)
 		}
 	}
+
 }
 
 func (j *Journaler) processEvent(d *TaggedDelivery) error {

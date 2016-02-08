@@ -50,14 +50,6 @@ func (rb *AmqpBeat) Setup(b *beat.Beat) error {
 
 func (rb *AmqpBeat) Run(b *beat.Beat) error {
 	logp.Info("Running...")
-	// The go routines below setup a pipeline that collects the messages received
-	// on each queue into a single channel.
-	// - Each consumer takes from it's delivery channel and writes it to events
-	// - Each consumer also selects on the rb.stop channel. When rb.stop
-	//   is closed, each consumer goroutine will exit and decrement wg's count.
-	// - A separate goroutine is used to wait on wg and clean up the events channels
-	//   as well as the amqp connection
-	// In other words, the entire pipeline can be stopped by closing rb.stop
 	serverURI := rb.RbConfig.AmqpInput.ServerURI
 
 	conn, err := amqp.Dial(*serverURI)
@@ -74,24 +66,35 @@ func (rb *AmqpBeat) Run(b *beat.Beat) error {
 	}
 	defer ch.Close()
 
-	var wg sync.WaitGroup
-	events := make(chan *TaggedDelivery)
+	rb.runPipeline(b, ch)
 
+	return nil
+}
+
+// The go routines setup a pipeline that collects the messages received
+// on each queue into a single channel.
+//
+// Each consumer takes from it's amqp channel and writes it to events and also also selects on the rb.stop channel.
+// When rb.stop is closed, each consumer's goroutine will exit and decrement wg's count. The aggregated events
+// are passed to the journaler, which will buffer and persist messages before emitting them via it's Out channel.
+//
+// Journaled messages are passed (in batches) to the publishStream method, which emits them via the libbeats client
+//
+// To stop the entire pipeline, close the rb.stop channel.
+func (rb *AmqpBeat) runPipeline(b *beat.Beat, ch *amqp.Channel) {
+
+	var wg sync.WaitGroup
 	wg.Add(len(*rb.RbConfig.AmqpInput.Channels))
 
+	events := make(chan *TaggedDelivery)
 	for _, c := range *rb.RbConfig.AmqpInput.Channels {
 		cfg := c
 		go rb.consumeIntoStream(events, ch, &cfg, &wg)
 	}
-
 	go rb.journaler.Run((<-chan *TaggedDelivery)(events), rb.stop)
-	go publishStream(rb.journaler.Out, b.Events)
-
-	//go publishStream(ch2, b.Events)
+	go publishStream(rb.journaler.Out, b.Events, &wg)
 
 	wg.Wait()
-
-	return nil
 }
 
 func (rb *AmqpBeat) consumeIntoStream(stream chan<- *TaggedDelivery, ch *amqp.Channel, c *ChannelConfig, wg *sync.WaitGroup) {
@@ -120,13 +123,23 @@ func (rb *AmqpBeat) consumeIntoStream(stream chan<- *TaggedDelivery, ch *amqp.Ch
 	}
 }
 
+func (rb *AmqpBeat) Cleanup(b *beat.Beat) error {
+	return nil
+}
+
+func (rb *AmqpBeat) Stop() {
+	if rb.stop != nil {
+		logp.Info("Stopping beat")
+		close(rb.stop)
+	}
+}
+
 type TaggedDelivery struct {
 	delivery *amqp.Delivery
-	body     []byte
 	typeTag  *string
 }
 
-func publishStream(stream <-chan []*TaggedDelivery, client publisher.Client) {
+func publishStream(stream <-chan []*TaggedDelivery, client publisher.Client, wg *sync.WaitGroup) {
 
 	for tdList := range stream {
 		events := make([]common.MapStr, 0, len(tdList))
@@ -163,13 +176,3 @@ func publishStream(stream <-chan []*TaggedDelivery, client publisher.Client) {
 	}
 }
 
-func (rb *AmqpBeat) Cleanup(b *beat.Beat) error {
-	return nil
-}
-
-func (rb *AmqpBeat) Stop() {
-	if rb.stop != nil {
-		logp.Info("Stopping beat")
-		close(rb.stop)
-	}
-}
