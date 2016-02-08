@@ -155,19 +155,18 @@ type TaggedDelivery struct {
 
 func publishStream(stream <-chan []*TaggedDelivery, client publisher.Client, wg *sync.WaitGroup) {
 
+	var failedDTags map[uint64]bool
 	for tdList := range stream {
 		events := make([]common.MapStr, 0, len(tdList))
-		sent := make([]*TaggedDelivery, 0, len(tdList))
+		failedDTags = make(map[uint64]bool)
 
 		for _, td := range tdList {
-			// process delivery
 			m := common.MapStr{}
 			err := json.Unmarshal(td.delivery.Body, &m)
 			if err != nil {
+				failedDTags[td.delivery.DeliveryTag] = true
 				logp.Err("Error unmarshalling: %s", err)
 				continue
-			} else {
-				sent = append(sent, td)
 			}
 			m["@timestamp"] = common.Time(time.Now())
 			m["type"] = *td.typeTag
@@ -178,8 +177,8 @@ func publishStream(stream <-chan []*TaggedDelivery, client publisher.Client, wg 
 		logp.Debug("", "Publishing %d events", len(events))
 		success := client.PublishEvents(events, publisher.Sync)
 
-		for _, td := range sent {
-			if success {
+		for _, td := range tdList {
+			if success && !failedDTags[td.delivery.DeliveryTag] {
 				logp.Debug("", "Acked event")
 				td.delivery.Ack(false)
 			} else {
