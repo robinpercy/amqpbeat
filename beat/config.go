@@ -34,18 +34,14 @@ func (s *Settings) CheckRequired() error {
 	}
 
 	inputErrors := s.AmqpInput.CheckRequired()
-
 	if inputErrors != nil {
 		e := inputErrors.(*ConfigError)
 		for k, v := range e.ErrorMap {
 			errors[k] = v
 		}
-
 		return errorFor(errors)
 	}
-
 	return nil
-
 }
 
 func (s *Settings) SetDefaults() error {
@@ -156,16 +152,17 @@ func (c *ChannelConfig) SetDefaults() {
 	}
 }
 
-func (c *ChannelConfig) CheckRequired(errors errorMap) errorMap {
+func (c *ChannelConfig) CheckRequired(errors errorMap) error {
 	if c == nil {
-		return errors
+		return nil
 	}
 
 	if c.Name == nil || strings.Trim(*c.Name, " ") == "" {
 		errors["channel.name"] = "All channels require a name attribute"
+		return errorFor(errors)
 	}
-	return errors
 
+	return nil
 }
 
 type errorMap map[string]string
