@@ -5,7 +5,10 @@ import (
 
 	"github.com/streadway/amqp"
 )
-import "strings"
+import (
+	"strings"
+	"bytes"
+)
 
 const DFLT_J_DIR = "/tmp/"
 const DFLT_J_BLKS = 4
@@ -155,4 +158,27 @@ type errorMap map[string]string
 
 func (e errorMap) missing(field string) {
 	e[field] = fmt.Sprintf("%s is required in config", field)
+}
+
+//ConfigError ...
+type ConfigError struct {
+	ErrorMap map[string]string
+}
+
+// ErrorFor ...
+func ErrorFor(m map[string]string) ConfigError {
+	return ConfigError{ErrorMap: m}
+}
+
+func (e ConfigError) Error() string {
+	if e.ErrorMap == nil {
+		return ""
+	}
+
+	var buffer bytes.Buffer
+	for key, msg := range e.ErrorMap {
+		buffer.WriteString(fmt.Sprintf("%s: %s\n", key, msg))
+	}
+
+	return buffer.String()
 }

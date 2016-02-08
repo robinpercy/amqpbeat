@@ -16,20 +16,20 @@ func TestMissingInputSectionError(t *testing.T) {
 }
 
 func TestComplainsWhenChannelsMissing(t *testing.T) {
-	err := checkFile("./test_data/missing_channels.yml")
+	err := checkFile("./testfiles/missing_channels.yml")
 	if len(err.ErrorMap) != 1 {
 		t.Errorf("Expected exactly one error, got %d", len(err.ErrorMap))
 	}
 }
 
 func TestComplainsWhenChannelNameMissing(t *testing.T) {
-	err := checkFile("./test_data/missing_channel_name.yml")
+	err := checkFile("./testfiles/missing_channel_name.yml")
 	assertErrorFor(t, err, "channel.name")
 }
 
 func TestDefaults(t *testing.T) {
 	var settings Settings
-	cfgfile.Read(&settings, "./test_data/minimal.yml")
+	cfgfile.Read(&settings, "./testfiles/minimal.yml")
 }
 
 func TestNilChannelValidationShortCircuits(t *testing.T) {
@@ -64,7 +64,7 @@ func TestEmptyConfigErrorMapGivesEmptyString(t *testing.T) {
 }
 
 func TestAllChannelValuesSet(t *testing.T) {
-	settings := loadFile("./test_data/full.yml")
+	settings := loadFile("./testfiles/full.yml")
 	if settings == nil {
 		t.Errorf("Settings should not be nil")
 	}

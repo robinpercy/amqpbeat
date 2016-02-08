@@ -15,7 +15,7 @@ import (
 )
 
 func TestCanStartAndStopBeat(t *testing.T) {
-	rb, b := helpBuildBeat("./test_data/minimal.yml")
+	rb, b := helpBuildBeat("./testfiles/minimal.yml")
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -30,7 +30,7 @@ func TestCanStartAndStopBeat(t *testing.T) {
 }
 
 func TestConfigIsLoaded(t *testing.T) {
-	rb, _ := helpBuildBeat("./test_data/minimal.yml")
+	rb, _ := helpBuildBeat("./testfiles/minimal.yml")
 	assert.NotNil(t, rb.Config)
 	assert.Equal(t, 1, len(*rb.RbConfig.AmqpInput.Channels))
 	assert.Equal(t, "test", *(*rb.RbConfig.AmqpInput.Channels)[0].Name)
@@ -42,7 +42,7 @@ func TestCanReceiveMessage(t *testing.T) {
 	test := fmt.Sprintf("{\"payload\": \"%s\"}", expected)
 
 	received := false
-	rb, b := helpBuildBeat("./test_data/full.yml")
+	rb, b := helpBuildBeat("./testfiles/full.yml")
 	pub := newPublisher(*rb.RbConfig.AmqpInput.ServerURI, &(*rb.RbConfig.AmqpInput.Channels)[0], nil)
 	defer pub.close()
 
@@ -180,7 +180,7 @@ func (test *MultiQueueTest) verify(r *Runner) {
 }
 
 func TestCanReceiveOnMultipleQueues(t *testing.T) {
-	r := newRunner(t, "./test_data/multi.yml")
+	r := newRunner(t, "./testfiles/multi.yml")
 	defer r.cleanup()
 	test := new(MultiQueueTest)
 	test.init()
