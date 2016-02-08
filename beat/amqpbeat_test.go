@@ -16,12 +16,12 @@ import (
 
 func TestCanStartAndStopBeat(t *testing.T) {
 	rb, b, err := helpBuildBeat("./testfiles/minimal.yml")
-	isError := err != nil
 
-	if isError {
+	if err != nil {
 		fmt.Printf("2. err = %v, %T\n", err, err)
 		assert.NotNil(t, err, err.Error())
 	}
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
