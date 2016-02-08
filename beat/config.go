@@ -6,14 +6,16 @@ import (
 	"github.com/streadway/amqp"
 )
 import (
-	"strings"
 	"bytes"
+	"strings"
 )
 
-const DFLT_J_DIR = "/tmp/"
-const DFLT_J_BLKS = 4
-const DFLT_J_FILE_SZ = 20 * 1024 * 1024
-const DFLT_J_DELAY = 500
+const (
+	defaultJournalDir      = "/tmp/"
+	defaultJournalBlocks   = 4
+	defaultJournalSizeKB   = 20 * 1024
+	defaultJournalMaxDelay = 500
+)
 
 // Settings ...
 type Settings struct {
@@ -81,22 +83,22 @@ func (j *JournalerConfig) SetDefaults() {
 
 	if j.JournalDir == nil {
 		j.JournalDir = new(string)
-		*j.JournalDir = DFLT_J_DIR
+		*j.JournalDir = defaultJournalDir
 	}
 
 	if j.BufferSizeBlocks == nil {
 		j.BufferSizeBlocks = new(int)
-		*j.BufferSizeBlocks = DFLT_J_BLKS
+		*j.BufferSizeBlocks = defaultJournalBlocks
 	}
 
 	if j.MaxFileSizeBytes == nil {
 		j.MaxFileSizeBytes = new(int)
-		*j.MaxFileSizeBytes = DFLT_J_FILE_SZ
+		*j.MaxFileSizeBytes = defaultJournalSizeKB
 	}
 
 	if j.MaxDelayMs == nil {
 		j.MaxDelayMs = new(int)
-		*j.MaxDelayMs = DFLT_J_DELAY
+		*j.MaxDelayMs = defaultJournalMaxDelay
 	}
 }
 

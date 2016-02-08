@@ -50,7 +50,7 @@ func TestCanReceiveMessage(t *testing.T) {
 	wg.Add(1)
 
 	b.Events = &MockClient{beat: rb,
-		eventsPublished: func(events[]common.MapStr, beat *AmqpBeat) {
+		eventsPublished: func(events []common.MapStr, beat *AmqpBeat) {
 			received = true
 			assert.Equal(t, expected, events[0]["payload"])
 			wg.Done()

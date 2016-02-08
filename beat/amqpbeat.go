@@ -122,6 +122,7 @@ func (rb *AmqpBeat) consumeIntoStream(stream chan<- *TaggedDelivery, ch *amqp.Ch
 
 type TaggedDelivery struct {
 	delivery *amqp.Delivery
+	body     []byte
 	typeTag  *string
 }
 
