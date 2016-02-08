@@ -50,11 +50,9 @@ func (e *emitter) sendAll() {
 	if len(e.queuedEvents) == 0 {
 		return
 	}
-
 	logp.Debug("", "Emitting %d queued messages", len(e.queuedEvents))
 	e.output <- e.queuedEvents
 	e.queuedEvents = make([]*TaggedDelivery, 0, len(e.queuedEvents))
-
 }
 
 func (e *emitter) close() {

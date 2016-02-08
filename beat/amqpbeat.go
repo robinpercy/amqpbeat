@@ -30,8 +30,16 @@ func (rb *AmqpBeat) ConfigWithFile(b *beat.Beat, filePath string) error {
 		return err
 	}
 
-	rb.RbConfig.CheckRequired()
-	rb.RbConfig.SetDefaults()
+	err = rb.RbConfig.CheckRequired()
+	if err != nil {
+		return err
+	}
+
+	err = rb.RbConfig.SetDefaults()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

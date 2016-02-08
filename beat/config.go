@@ -8,6 +8,7 @@ import (
 import (
 	"bytes"
 	"strings"
+	"errors"
 )
 
 const (
@@ -25,23 +26,33 @@ type Settings struct {
 /*
 CheckRequired ...
 */
-func (s *Settings) CheckRequired() ConfigError {
+func (s *Settings) CheckRequired() error {
 	errors := make(errorMap)
 	if s.AmqpInput == nil {
 		errors.missing("amqpinput")
-		return ErrorFor(errors)
+		return errorFor(errors)
 	}
 
 	inputErrors := s.AmqpInput.CheckRequired()
 
-	for k, v := range inputErrors.ErrorMap {
-		errors[k] = v
+	if inputErrors != nil {
+		e := inputErrors.(*ConfigError)
+		for k, v := range e.ErrorMap {
+			errors[k] = v
+		}
+
+		return errorFor(errors)
 	}
 
-	return ErrorFor(errors)
+	return nil
+
 }
 
-func (s *Settings) SetDefaults() {
+func (s *Settings) SetDefaults() error {
+	if s.AmqpInput == nil {
+		return errors.New("amqpinput section is missing from settings file.")
+	}
+
 	for i := range *s.AmqpInput.Channels {
 		(*s.AmqpInput.Channels)[i].SetDefaults()
 	}
@@ -51,6 +62,7 @@ func (s *Settings) SetDefaults() {
 	}
 
 	s.AmqpInput.Journal.SetDefaults()
+	return nil;
 }
 
 // AmqpConfig ...
@@ -60,7 +72,7 @@ type AmqpConfig struct {
 	Journal   *JournalerConfig
 }
 
-func (a *AmqpConfig) CheckRequired() ConfigError {
+func (a *AmqpConfig) CheckRequired() error {
 	errors := make(errorMap)
 	if a.Channels == nil || len(*a.Channels) == 0 {
 		errors.missing("channels")
@@ -69,7 +81,7 @@ func (a *AmqpConfig) CheckRequired() ConfigError {
 			c.CheckRequired(errors)
 		}
 	}
-	return ErrorFor(errors)
+	return errorFor(errors)
 }
 
 type JournalerConfig struct {
@@ -168,11 +180,14 @@ type ConfigError struct {
 }
 
 // ErrorFor ...
-func ErrorFor(m map[string]string) ConfigError {
-	return ConfigError{ErrorMap: m}
+func errorFor(m map[string]string) error {
+	if len(m) == 0 {
+		return nil
+	}
+	return &ConfigError{ErrorMap: m}
 }
 
-func (e ConfigError) Error() string {
+func (e *ConfigError) Error() string {
 	if e.ErrorMap == nil {
 		return ""
 	}

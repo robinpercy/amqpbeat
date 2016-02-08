@@ -6,25 +6,47 @@ import (
 	"testing"
 
 	"github.com/elastic/libbeat/cfgfile"
+	"github.com/elastic/beats/vendor/github.com/stretchr/testify/assert"
 )
+
+func TestMissingConfigFailsGracefully(t *testing.T) {
+	var settings Settings
+	settings.CheckRequired()
+	settings.SetDefaults()
+}
+
+func TestJournalCfgIsOptional(t *testing.T) {
+	var settings Settings
+	cfgfile.Read(&settings, "./testfiles/minimal.yml")
+	err := settings.SetDefaults()
+	assert.Nil(t, err, fmt.Sprintf("Unexected error %v", err))
+	jcfg := settings.AmqpInput.Journal
+	assert.NotNil(t, jcfg, "JournalConfig be populated with defaults")
+	assert.NotNil(t, jcfg.BufferSizeBlocks)
+	assert.NotNil(t, jcfg.JournalDir)
+	assert.NotNil(t, jcfg.MaxDelayMs)
+	assert.NotNil(t, jcfg.MaxFileSizeBytes)
+}
 
 func TestMissingInputSectionError(t *testing.T) {
 	var settings Settings
 	cfgfile.Read(&settings, "")
 	err := settings.CheckRequired()
-	assertErrorFor(t, err, "amqpinput")
+	assertErrorFor(t, err.(*ConfigError), "amqpinput")
 }
 
 func TestComplainsWhenChannelsMissing(t *testing.T) {
 	err := checkFile("./testfiles/missing_channels.yml")
-	if len(err.ErrorMap) != 1 {
-		t.Errorf("Expected exactly one error, got %d", len(err.ErrorMap))
+	e := err.(*ConfigError)
+	if len(e.ErrorMap) != 1 {
+		t.Errorf("Expected exactly one error, got %d", len(e.ErrorMap))
 	}
 }
 
 func TestComplainsWhenChannelNameMissing(t *testing.T) {
 	err := checkFile("./testfiles/missing_channel_name.yml")
-	assertErrorFor(t, err, "channel.name")
+	e := err.(*ConfigError)
+	assertErrorFor(t, e, "channel.name")
 }
 
 func TestDefaults(t *testing.T) {
@@ -45,7 +67,7 @@ func TestConfigErrorMapConcatsMessages(t *testing.T) {
 	errMap := make(errorMap)
 	errMap["foo1"] = "bar1"
 	errMap["foo2"] = "bar2"
-	errStr := ErrorFor(errMap).Error()
+	errStr := errorFor(errMap).Error()
 	for k, v := range errMap {
 		expected := fmt.Sprintf("%s: %s\n", k, v)
 		if !strings.Contains(errStr, expected) {
@@ -90,7 +112,7 @@ func TestAllChannelValuesSet(t *testing.T) {
 	}
 }
 
-func assertErrorFor(t *testing.T, e ConfigError, key string) {
+func assertErrorFor(t *testing.T, e *ConfigError, key string) {
 	if _, ok := e.ErrorMap[key]; !ok {
 		t.Errorf("%s should be reported as missing", key)
 	}
@@ -102,7 +124,7 @@ func loadFile(fileName string) *Settings {
 	return &settings
 }
 
-func checkFile(fileName string) ConfigError {
+func checkFile(fileName string) error {
 	settings := loadFile(fileName)
 	return settings.CheckRequired()
 }

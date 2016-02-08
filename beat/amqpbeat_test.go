@@ -15,7 +15,13 @@ import (
 )
 
 func TestCanStartAndStopBeat(t *testing.T) {
-	rb, b := helpBuildBeat("./testfiles/minimal.yml")
+	rb, b, err := helpBuildBeat("./testfiles/minimal.yml")
+	isError := err != nil
+
+	if isError {
+		fmt.Printf("2. err = %v, %T\n", err, err)
+		assert.NotNil(t, err, err.Error())
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -30,7 +36,7 @@ func TestCanStartAndStopBeat(t *testing.T) {
 }
 
 func TestConfigIsLoaded(t *testing.T) {
-	rb, _ := helpBuildBeat("./testfiles/minimal.yml")
+	rb, _, _ := helpBuildBeat("./testfiles/minimal.yml")
 	assert.NotNil(t, rb.Config)
 	assert.Equal(t, 1, len(*rb.RbConfig.AmqpInput.Channels))
 	assert.Equal(t, "test", *(*rb.RbConfig.AmqpInput.Channels)[0].Name)
@@ -42,7 +48,7 @@ func TestCanReceiveMessage(t *testing.T) {
 	test := fmt.Sprintf("{\"payload\": \"%s\"}", expected)
 
 	received := false
-	rb, b := helpBuildBeat("./testfiles/full.yml")
+	rb, b, _ := helpBuildBeat("./testfiles/full.yml")
 	pub := newPublisher(*rb.RbConfig.AmqpInput.ServerURI, &(*rb.RbConfig.AmqpInput.Channels)[0], nil)
 	defer pub.close()
 
@@ -76,7 +82,7 @@ type Runner struct {
 }
 
 func newRunner(t *testing.T, config string) *Runner {
-	ab, b := helpBuildBeat(config)
+	ab, b, _ := helpBuildBeat(config)
 	r := &Runner{
 		ab:       ab,
 		b:        b,
@@ -192,16 +198,19 @@ func TestCanReceiveOnMultipleQueues(t *testing.T) {
 	r.run()
 }
 
-func helpBuildBeat(cfgFile string) (*AmqpBeat, *beat.Beat) {
+func helpBuildBeat(cfgFile string) (*AmqpBeat, *beat.Beat, error) {
 	rb := new(AmqpBeat)
 	b := beat.NewBeat("", "", rb)
 	b.Events = &MockClient{beat: rb,
 		eventsPublished: func(event []common.MapStr, beat *AmqpBeat) {
 		},
 	}
-	rb.ConfigWithFile(b, cfgFile)
+	err := rb.ConfigWithFile(b, cfgFile)
+	if err != nil {
+		return rb, b, err
+	}
 	rb.Setup(b)
-	return rb, b
+	return rb, b, nil
 }
 
 type Publisher struct {
