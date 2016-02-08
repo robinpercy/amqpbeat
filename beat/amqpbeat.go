@@ -78,23 +78,37 @@ func (rb *AmqpBeat) Run(b *beat.Beat) error {
 // When rb.stop is closed, each consumer's goroutine will exit and decrement wg's count. The aggregated events
 // are passed to the journaler, which will buffer and persist messages before emitting them via it's Out channel.
 //
-// Journaled messages are passed (in batches) to the publishStream method, which emits them via the libbeats client
+// Journaled messages are passed (in batches) to the publishStream method, which emits them via the libbeat client.
 //
-// To stop the entire pipeline, close the rb.stop channel.
+// To stop the entire pipeline, close the rb.stop channel. This will result in all consumers exiting and incrementing
+// the consumer WaitGroup. Once we've finished waiting on that, we close the events channel, which will signal
+// the journaler to finish processing events and close its Out channel.
 func (rb *AmqpBeat) runPipeline(b *beat.Beat, ch *amqp.Channel) {
 
-	var wg sync.WaitGroup
-	wg.Add(len(*rb.RbConfig.AmqpInput.Channels))
+	var consumerGroup sync.WaitGroup
+	consumerGroup.Add(len(*rb.RbConfig.AmqpInput.Channels))
 
 	events := make(chan *TaggedDelivery)
 	for _, c := range *rb.RbConfig.AmqpInput.Channels {
 		cfg := c
-		go rb.consumeIntoStream(events, ch, &cfg, &wg)
+		go rb.consumeIntoStream(events, ch, &cfg, &consumerGroup)
 	}
 	go rb.journaler.Run((<-chan *TaggedDelivery)(events), rb.stop)
-	go publishStream(rb.journaler.Out, b.Events, &wg)
 
-	wg.Wait()
+	var publisherGroup sync.WaitGroup
+	publisherGroup.Add(1)
+	go publishStream(rb.journaler.Out, b.Events, &publisherGroup)
+
+	// Wait for all consumers to receive the stop 'signal' (ie close(stop))
+	consumerGroup.Wait()
+
+	// Close the events channel, since no more messages will be sent through it.
+	// this will cause the journaler to close its Out channel
+	close(events)
+
+	// Wait for the publisher to finish processing the journaler.Out channel
+	publisherGroup.Wait()
+
 }
 
 func (rb *AmqpBeat) consumeIntoStream(stream chan<- *TaggedDelivery, ch *amqp.Channel, c *ChannelConfig, wg *sync.WaitGroup) {
@@ -174,5 +188,7 @@ func publishStream(stream <-chan []*TaggedDelivery, client publisher.Client, wg 
 			}
 		}
 	}
+
+	wg.Done()
 }
 

@@ -47,6 +47,10 @@ func (e *emitter) add(event *TaggedDelivery) {
 }
 
 func (e *emitter) sendAll() {
+	if len(e.queuedEvents) == 0 {
+		return
+	}
+
 	logp.Debug("", "Emitting %d queued messages", len(e.queuedEvents))
 	e.output <- e.queuedEvents
 	e.queuedEvents = make([]*TaggedDelivery, 0, len(e.queuedEvents))
@@ -115,6 +119,7 @@ func (j *Journaler) Close() {
 // be published to the j.Out channel
 func (j *Journaler) Run(input <-chan *TaggedDelivery, stop chan interface{}) {
 	var err error
+	defer j.Close()
 
 loop:
 	for {
@@ -122,19 +127,19 @@ loop:
 		// on whether the buffer is out of space. Whereas on receiving a timer
 		// event, we always need to flush the buffer.
 		select {
-		case d := <-input:
+		case d, more := <-input:
+			if !more {
+				break loop
+			}
 			err = j.processEvent(d)
 		case <-j.timer.C:
 			err = j.flush()
-		case <-stop:
-			break loop
 		}
 
 		if err != nil {
 			panic(err)
 		}
 	}
-
 }
 
 func (j *Journaler) processEvent(d *TaggedDelivery) error {
