@@ -5,12 +5,14 @@ import (
 	"sync"
 	"time"
 
+	"fmt"
 	"github.com/elastic/libbeat/beat"
 	"github.com/elastic/libbeat/cfgfile"
 	"github.com/elastic/libbeat/common"
 	"github.com/elastic/libbeat/logp"
 	"github.com/elastic/libbeat/publisher"
 	"github.com/streadway/amqp"
+	"strings"
 )
 
 type AmqpBeat struct {
@@ -96,12 +98,12 @@ func (rb *AmqpBeat) runPipeline(b *beat.Beat, ch *amqp.Channel) {
 	var consumerGroup sync.WaitGroup
 	consumerGroup.Add(len(*rb.RbConfig.AmqpInput.Channels))
 
-	events := make(chan *TaggedDelivery)
+	events := make(chan *AmqpEvent)
 	for _, c := range *rb.RbConfig.AmqpInput.Channels {
 		cfg := c
 		go rb.consumeIntoStream(events, ch, &cfg, &consumerGroup)
 	}
-	go rb.journaler.Run((<-chan *TaggedDelivery)(events), rb.stop)
+	go rb.journaler.Run((<-chan *AmqpEvent)(events), rb.stop)
 
 	var publisherGroup sync.WaitGroup
 	publisherGroup.Add(1)
@@ -119,7 +121,7 @@ func (rb *AmqpBeat) runPipeline(b *beat.Beat, ch *amqp.Channel) {
 
 }
 
-func (rb *AmqpBeat) consumeIntoStream(stream chan<- *TaggedDelivery, ch *amqp.Channel, c *ChannelConfig, wg *sync.WaitGroup) {
+func (rb *AmqpBeat) consumeIntoStream(stream chan<- *AmqpEvent, ch *amqp.Channel, c *ChannelConfig, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	_, err := ch.QueueDeclare(*c.Name, *c.Durable, *c.AutoDelete, false, false, *c.Args)
@@ -137,12 +139,85 @@ func (rb *AmqpBeat) consumeIntoStream(stream chan<- *TaggedDelivery, ch *amqp.Ch
 	for {
 		select {
 		case d := <-q:
-			stream <- &TaggedDelivery{delivery: &d, typeTag: c.TypeTag}
+			evt, err := newAmqpEvent(&d, c.TypeTag, c.TsField, c.TsFormat)
+			if err != nil {
+				logp.Warn("failed to build event for delivery, will nack and requeue. delivery: %v \nreason: %v", d, err)
+				d.Nack(false, true)
+			}
+			stream <- evt
 		case <-rb.stop:
 			logp.Info("Consumer '%s' is stopping...")
 			return
 		}
 	}
+}
+
+func newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFormat *string) (*AmqpEvent, error) {
+	m := common.MapStr{}
+	err := json.Unmarshal(delivery.Body, &m)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshalling delivery %v: %v", delivery.Body, err)
+	}
+
+	now := time.Now()
+	ts := common.Time(now)
+	if tsField != nil && tsFormat != nil {
+		var err error
+		ts, err = extractTS(m, *tsField, *tsFormat)
+		if err != nil {
+			logp.Warn("Failed to extract @timestamp for event, defaulting to current time ('%s'): %v", now, err)
+		}
+	}
+
+	m["type"] = *typeTag
+	m["@timestamp"] = ts
+
+	ev := &AmqpEvent{
+		deliveryTag:  delivery.DeliveryTag,
+		acknowledger: delivery.Acknowledger,
+		body:         m,
+	}
+
+	return ev, nil
+
+}
+
+func extractTS(m common.MapStr, tsField, tsFormat string) (common.Time, error) {
+	// NOTE: this only works if keys do not contain periods.
+	// TODO: support periods in path components
+	dflt := common.Time(time.Now())
+	path := strings.Split(tsField, ".")
+	submap := m
+	var ok bool
+	for _, k := range path[:len(path)-1] {
+		v, found := submap[k]
+		if !found {
+			return dflt, fmt.Errorf("did not find component '%s' of path '%s' in %v", k, tsField, m)
+		}
+
+		// careful not to shadow submap here (ie don't use ':=' )
+		submap, ok = v.(common.MapStr)
+		if !ok {
+			return dflt, fmt.Errorf("component '%s' of path '%s' is not a submap in %v", k, tsField, m)
+		}
+	}
+
+	tsValue, found := submap[path[len(path)-1]]
+	if !found {
+		return dflt, fmt.Errorf("no value found at path '%s' in %v", tsField, m)
+	}
+
+	tsStr, ok := tsValue.(string)
+	if !ok {
+		return dflt, fmt.Errorf("value '%v' at path '%s' is not a string, cannot parse as timestamp", tsValue, tsField)
+	}
+
+	ts, err := time.Parse(tsFormat, tsStr)
+	if err != nil {
+		return dflt, fmt.Errorf("failed to parse timestamp '%s' with layout '%s': %v", tsValue, tsFormat, err)
+	}
+
+	return common.Time(ts), nil
 }
 
 func (rb *AmqpBeat) Cleanup(b *beat.Beat) error {
@@ -156,46 +231,36 @@ func (rb *AmqpBeat) Stop() {
 	}
 }
 
-type TaggedDelivery struct {
-	delivery *amqp.Delivery
-	typeTag  *string
+type AmqpEvent struct {
+	deliveryTag  uint64
+	acknowledger amqp.Acknowledger
+	body         common.MapStr
 }
 
-func publishStream(stream <-chan []*TaggedDelivery, client publisher.Client, wg *sync.WaitGroup) {
+func publishStream(stream <-chan []*AmqpEvent, client publisher.Client, wg *sync.WaitGroup) {
 
 	var failedDTags map[uint64]bool
-	for tdList := range stream {
-		events := make([]common.MapStr, 0, len(tdList))
+	for evList := range stream {
 		failedDTags = make(map[uint64]bool)
 
-		for _, td := range tdList {
-			m := common.MapStr{}
-			err := json.Unmarshal(td.delivery.Body, &m)
-			if err != nil {
-				failedDTags[td.delivery.DeliveryTag] = true
-				logp.Err("Error unmarshalling: %s", err)
-				continue
-			}
-			m["@timestamp"] = common.Time(time.Now())
-			m["type"] = *td.typeTag
-			logp.Debug("", "Publishing event: %v", m)
-			events = append(events, m)
+		payloads := make([]common.MapStr, len(evList))
+		for i, ev := range evList {
+			payloads[i] = ev.body
 		}
 
-		logp.Debug("", "Publishing %d events", len(events))
-		success := client.PublishEvents(events, publisher.Sync)
+		logp.Debug("", "Publishing %d events", len(evList))
+		success := client.PublishEvents(payloads, publisher.Sync)
 
-		for _, td := range tdList {
-			if success && !failedDTags[td.delivery.DeliveryTag] {
+		for _, ev := range evList {
+			if success && !failedDTags[ev.deliveryTag] {
 				logp.Debug("", "Acked event")
-				td.delivery.Ack(false)
+				ev.acknowledger.Ack(ev.deliveryTag, false)
 			} else {
-				logp.Err("Failed to publish event: %v", td.delivery.Body)
-				td.delivery.Nack(false, true)
+				logp.Err("Failed to publish event: %v", ev.body)
+				ev.acknowledger.Nack(ev.deliveryTag, false, true)
 			}
 		}
 	}
 
 	wg.Done()
 }
-

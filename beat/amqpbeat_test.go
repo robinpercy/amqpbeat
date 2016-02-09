@@ -207,7 +207,7 @@ func helpBuildBeat(cfgFile string) (*AmqpBeat, *beat.Beat, error) {
 	}
 	err := rb.ConfigWithFile(b, cfgFile)
 	if err != nil {
-		return rb, b, err
+		panic(err)
 	}
 	rb.Setup(b)
 	return rb, b, nil

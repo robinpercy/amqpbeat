@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/elastic/libbeat/logp"
+	"encoding/json"
 )
 
 const (
@@ -34,15 +35,15 @@ type Journaler struct {
 	buffer           *bufio.Writer
 	timer            *time.Timer
 	emitter          *emitter
-	Out              chan []*TaggedDelivery
+	Out              chan []*AmqpEvent
 }
 
 type emitter struct {
-	queuedEvents []*TaggedDelivery
-	output       chan<- []*TaggedDelivery
+	queuedEvents []*AmqpEvent
+	output       chan<- []*AmqpEvent
 }
 
-func (e *emitter) add(event *TaggedDelivery) {
+func (e *emitter) add(event *AmqpEvent) {
 	e.queuedEvents = append(e.queuedEvents, event)
 }
 
@@ -52,7 +53,7 @@ func (e *emitter) sendAll() {
 	}
 	logp.Debug("", "Emitting %d queued messages", len(e.queuedEvents))
 	e.output <- e.queuedEvents
-	e.queuedEvents = make([]*TaggedDelivery, 0, len(e.queuedEvents))
+	e.queuedEvents = make([]*AmqpEvent, 0, len(e.queuedEvents))
 }
 
 func (e *emitter) close() {
@@ -61,9 +62,9 @@ func (e *emitter) close() {
 
 func NewJournaler(cfg *JournalerConfig) (*Journaler, error) {
 
-	out := make(chan []*TaggedDelivery)
+	out := make(chan []*AmqpEvent)
 	emitter := &emitter{
-		queuedEvents: make([]*TaggedDelivery, 0, 128),
+		queuedEvents: make([]*AmqpEvent, 0, 128),
 		output:       out,
 	}
 	maxDelay := time.Duration(1000) * time.Millisecond
@@ -115,7 +116,7 @@ func (j *Journaler) Close() {
 // or the maxDelay time has exceeded.  Either condition will cause the
 // the journal to be flushed to disk and the journaled deliveries to
 // be published to the j.Out channel
-func (j *Journaler) Run(input <-chan *TaggedDelivery, stop chan interface{}) {
+func (j *Journaler) Run(input <-chan *AmqpEvent, stop chan interface{}) {
 	var err error
 	defer j.Close()
 
@@ -140,7 +141,7 @@ loop:
 	}
 }
 
-func (j *Journaler) processEvent(d *TaggedDelivery) error {
+func (j *Journaler) processEvent(d *AmqpEvent) error {
 	if j.curFileSizeBytes > j.maxFileSizeBytes {
 		// Rollover journal file
 		j.Close()
@@ -148,7 +149,7 @@ func (j *Journaler) processEvent(d *TaggedDelivery) error {
 	}
 
 	// We don't have enough room in the buffer, so flush, sync and send
-	if len(d.delivery.Body) > j.buffer.Available() {
+	if len(d.body) > j.buffer.Available() {
 		err := j.flush()
 
 		if err != nil {
@@ -156,12 +157,17 @@ func (j *Journaler) processEvent(d *TaggedDelivery) error {
 		}
 	}
 
+	bytes, err := json.Marshal(d.body)
+	if err != nil {
+		return fmt.Errorf("failed to encode to payload: %v: %v", d.body, err)
+	}
+
 	// Now that we've made room (if necessary), add the next event
 	j.emitter.add(d)
 	// TODO: add TagType as well?
 	// TODO: compress the data going to disk, will require modifying the
 	//       buffer.Available() check above
-	j.buffer.Write(d.delivery.Body)
+	j.buffer.Write(bytes)
 
 	return nil
 }

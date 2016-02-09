@@ -4,10 +4,36 @@
 amqpinput:
   serveruri: "amqp://guest:guest@localhost:5672/"
 
+  journal:
+      journaldir: "/tmp/amqpbeat/journal"
+      buffersizeblocks: 16
+      maxfilesizebytes: 10485760
+      maxdelayms: 500
+
   channels:
-    - name: "test"
-      typetag: "beattest"
+    - name: "testA"
+      typetag: "A"
       required: true
+      tsfield: "timestamp"
+      tsformat: "2006-01-02 15:16:17"
+
+    - name: "testB"
+      typetag: "B"
+      required: true
+      tsfield: "timestamp"
+      tsformat: "2006-01-02 15:16:17"
+
+    - name: "testC"
+      typetag: "C"
+      required: true
+      tsfield: "timestamp"
+      tsformat: "2006-01-02 15:16:17"
+
+    - name: "testD"
+      typetag: "D"
+      required: true
+      tsfield: "timestamp"
+      tsformat: "2006-01-02 15:16:17"
 
 ############################# Output ##########################################
 

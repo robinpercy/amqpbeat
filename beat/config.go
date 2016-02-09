@@ -7,8 +7,9 @@ import (
 )
 import (
 	"bytes"
-	"strings"
 	"errors"
+	"strings"
+	"time"
 )
 
 const (
@@ -58,7 +59,7 @@ func (s *Settings) SetDefaults() error {
 	}
 
 	s.AmqpInput.Journal.SetDefaults()
-	return nil;
+	return nil
 }
 
 // AmqpConfig ...
@@ -123,6 +124,8 @@ type ChannelConfig struct {
 	MinIntervalMS     *int
 	MaxMessagesPerSec *int
 	TypeTag           *string
+	TsField    		  *string
+	TsFormat          *string
 }
 
 func (c *ChannelConfig) SetDefaults() {
@@ -157,8 +160,36 @@ func (c *ChannelConfig) CheckRequired(errors errorMap) error {
 		return nil
 	}
 
+	foundErr := false
 	if c.Name == nil || strings.Trim(*c.Name, " ") == "" {
+		foundErr = true
 		errors["channel.name"] = "All channels require a name attribute"
+	}
+
+	if c.TsField == nil && c.TsFormat != nil {
+		foundErr = true
+		errors["channel.tsfield"] = "tsfield must be set if tsformat is set"
+	}
+
+	if c.TsField != nil && c.TsFormat == nil {
+		foundErr = true
+		errors["channel.tsformat"] = "tsformat must be set if tsfield is set"
+	}
+
+	if c.TsFormat != nil {
+		errKey := "channel.ts.format.test"
+		errTpl := "tsformat '%s' is not a valid date format error while testing was: %v"
+
+		str := time.Now().Format(*c.TsFormat)
+		_, err := time.Parse(*c.TsFormat, str)
+
+		if err != nil {
+			foundErr = true
+			errors[errKey] = fmt.Sprintf(errTpl, *c.TsFormat, err)
+		}
+	}
+
+	if foundErr {
 		return errorFor(errors)
 	}
 
