@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/elastic/libbeat/cfgfile"
 	"github.com/elastic/beats/vendor/github.com/stretchr/testify/assert"
+	"github.com/elastic/libbeat/cfgfile"
 )
 
 func TestMissingConfigFailsGracefully(t *testing.T) {

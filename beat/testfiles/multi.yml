@@ -25,7 +25,7 @@ amqpinput:
       typetag: "C"
       required: true
       tsfield: "timestampC"
-      tsformat: "20060102030405"
+      tsformat: "20060102150405"
 
     - name: "testD"
       typetag: "D"

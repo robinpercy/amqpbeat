@@ -124,7 +124,7 @@ type ChannelConfig struct {
 	MinIntervalMS     *int
 	MaxMessagesPerSec *int
 	TypeTag           *string
-	TsField    		  *string
+	TsField           *string
 	TsFormat          *string
 }
 

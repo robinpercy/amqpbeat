@@ -12,6 +12,7 @@ import (
 	"github.com/robinpercy/amqpbeat/utils"
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
+	"strings"
 )
 
 func TestCanStartAndStopBeat(t *testing.T) {
@@ -40,6 +41,33 @@ func TestConfigIsLoaded(t *testing.T) {
 	assert.NotNil(t, rb.Config)
 	assert.Equal(t, 1, len(*rb.RbConfig.AmqpInput.Channels))
 	assert.Equal(t, "test", *(*rb.RbConfig.AmqpInput.Channels)[0].Name)
+}
+
+func TestExtractTs(t *testing.T) {
+
+	type test struct {
+		tsField string
+		tsFormat string
+		tsValue string
+		expected string
+	}
+	tests := [...]test{
+		test{"field1", "2006-01-02 15:04:05 -0700", "2001-02-03 08:09:10 +0100", "2001-02-03T07:09:10.000Z"},
+		test{"field1", "January 02, 2006 03:04:05PM -0700", "December 29, 2015 01:55:15PM -0000", "2015-12-29T13:55:15.000Z"},
+		test{"field1", "20060102150405", "20151229135515", "2015-12-29T13:55:15.000Z"},
+		test{"field1", "01/02 `06, 03:04:05.00000 -0700", "12/29 `15, 06:55:15.00000 -0700", "2015-12-29T13:55:15.000Z"},
+	}
+
+	for _, tst := range tests {
+		m := make(common.MapStr)
+		m[tst.tsField] = tst.tsValue
+		ts, err := extractTS(m, tst.tsField, tst.tsFormat)
+		assert.Nil(t, err)
+		bytes, _ := ts.MarshalJSON()
+		str := string(bytes)
+		assert.Equal(t, tst.expected, strings.Trim(str, "\""))
+	}
+
 }
 
 func TestCanReceiveMessage(t *testing.T) {

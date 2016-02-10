@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/elastic/libbeat/logp"
 	"encoding/json"
+	"github.com/elastic/libbeat/logp"
 )
 
 const (
