@@ -70,12 +70,13 @@ func TestExtractTsFormats(t *testing.T) {
 }
 
 func TestNestedTsField(t *testing.T) {
-	m := make(common.MapStr)
-	m["foo"] = make(common.MapStr)
-	foo := m["foo"].(common.MapStr)
-	foo["bar"] = make(common.MapStr)
-	bar := foo["bar"].(common.MapStr)
-	bar["tsfield"] = "December 29, 2015 01:55:15PM -0000"
+	m := common.MapStr{
+		"foo": common.MapStr{
+			"bar": common.MapStr{
+				"tsfield": "December 29, 2015 01:55:15PM -0000",
+			},
+		},
+	}
 
 	ts, err := extractTS(m, "foo.bar.tsfield", "January 02, 2006 03:04:05PM -0700")
 	assert.Nil(t, err)
