@@ -167,6 +167,8 @@ func newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFormat *string) (
 		if err != nil {
 			logp.Warn("Failed to extract @timestamp for event, defaulting to current time ('%s'): %v", now, err)
 		}
+	} else {
+		fmt.Println("Skipping timestamp lookup")
 	}
 
 	m["type"] = *typeTag
@@ -196,7 +198,7 @@ func extractTS(m common.MapStr, tsField, tsFormat string) (common.Time, error) {
 		}
 
 		// careful not to shadow submap here (ie don't use ':=' )
-		submap, ok = v.(common.MapStr)
+		submap, ok = v.(map[string]interface{})
 		if !ok {
 			return dflt, fmt.Errorf("component '%s' of path '%s' is not a submap in %v", k, tsField, m)
 		}

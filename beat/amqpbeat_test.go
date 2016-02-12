@@ -13,6 +13,11 @@ import (
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
 	"strings"
+	"encoding/json"
+)
+
+const (
+	tsOutput = "2015-12-29T13:55:15.000Z"
 )
 
 func TestCanStartAndStopBeat(t *testing.T) {
@@ -52,10 +57,10 @@ func TestExtractTsFormats(t *testing.T) {
 		expected string
 	}
 	tests := [...]test{
-		test{"field1", "2006-01-02 15:04:05 -0700", "2001-02-03 08:09:10 +0100", "2001-02-03T07:09:10.000Z"},
-		test{"field2", "January 02, 2006 03:04:05PM -0700", "December 29, 2015 01:55:15PM -0000", "2015-12-29T13:55:15.000Z"},
-		test{"field3", "20060102150405", "20151229135515", "2015-12-29T13:55:15.000Z"},
-		test{"field4", "01/02 `06, 03:04:05.00000 -0700", "12/29 `15, 06:55:15.00000 -0700", "2015-12-29T13:55:15.000Z"},
+		test{"field1", "2006-01-02 15:04:05 -0700", "2015-12-29 14:55:15 +0100", tsOutput},
+		test{"field2", "January 02, 2006 03:04:05PM -0700", "December 29, 2015 01:55:15PM -0000", tsOutput},
+		test{"field3", "20060102150405", "20151229135515", tsOutput},
+		test{"field4", "01/02 `06, 03:04:05.00000 -0700", "12/29 `15, 06:55:15.00000 -0700", tsOutput},
 	}
 
 	for _, tst := range tests {
@@ -71,8 +76,8 @@ func TestExtractTsFormats(t *testing.T) {
 
 func TestNestedTsField(t *testing.T) {
 	m := common.MapStr{
-		"foo": common.MapStr{
-			"bar": common.MapStr{
+		"foo": map[string]interface{}{
+			"bar": map[string]interface{}{
 				"tsfield": "December 29, 2015 01:55:15PM -0000",
 			},
 		},
@@ -82,16 +87,33 @@ func TestNestedTsField(t *testing.T) {
 	assert.Nil(t, err)
 	bytes, _ := ts.MarshalJSON()
 	str := string(bytes)
-	assert.Equal(t, "2015-12-29T13:55:15.000Z", strings.Trim(str, "\""))
+	assert.Equal(t, tsOutput, strings.Trim(str, "\""))
 }
 
-func TestCanReceiveMessage(t *testing.T) {
+func TestSingleMessage(t *testing.T) {
 
 	expected := "This is a test"
-	test := fmt.Sprintf("{\"payload\": \"%s\"}", expected)
+	data := struct{
+		Payload string `json:"payload"`
+		Nested common.MapStr `json:"nested"`
+	} {
+		Payload: expected,
+		Nested: common.MapStr {
+			"tsfield": "December 29, 2015 01:55:15PM -0000",
+		},
+	}
+
+	test, err := json.Marshal(data)
+	assert.Nil(t, err)
 
 	received := false
 	rb, b, _ := helpBuildBeat("./testfiles/full.yml")
+	c0 := &(*rb.RbConfig.AmqpInput.Channels)[0]
+	c0.TsField = new(string)
+	*c0.TsField = "nested.tsfield"
+	c0.TsFormat = new(string)
+	*c0.TsFormat = "January 02, 2006 03:04:05PM -0700"
+
 	pub := newPublisher(*rb.RbConfig.AmqpInput.ServerURI, &(*rb.RbConfig.AmqpInput.Channels)[0], nil)
 	defer pub.close()
 
@@ -102,12 +124,15 @@ func TestCanReceiveMessage(t *testing.T) {
 		eventsPublished: func(events []common.MapStr, beat *AmqpBeat) {
 			received = true
 			assert.Equal(t, expected, events[0]["payload"])
+			ct, _ := events[0]["@timestamp"].(common.Time)
+			js, _ := ct.MarshalJSON()
+			assert.Equal(t, tsOutput, strings.Trim(string(js), "\""))
 			wg.Done()
 		},
 	}
 
 	go rb.Run(b)
-	pub.send(test)
+	pub.send(string(test))
 
 	wg.Wait()
 	rb.Stop()
