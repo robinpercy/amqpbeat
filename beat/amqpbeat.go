@@ -167,8 +167,6 @@ func newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFormat *string) (
 		if err != nil {
 			logp.Warn("Failed to extract @timestamp for event, defaulting to current time ('%s'): %v", now, err)
 		}
-	} else {
-		fmt.Println("Skipping timestamp lookup")
 	}
 
 	m["type"] = *typeTag
