@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"encoding/json"
 	"github.com/elastic/libbeat/beat"
 	"github.com/elastic/libbeat/common"
 	"github.com/elastic/libbeat/publisher"
@@ -13,7 +14,6 @@ import (
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
 	"strings"
-	"encoding/json"
 )
 
 const (
@@ -93,12 +93,12 @@ func TestNestedTsField(t *testing.T) {
 func TestSingleMessage(t *testing.T) {
 
 	expected := "This is a test"
-	data := struct{
-		Payload string `json:"payload"`
-		Nested common.MapStr `json:"nested"`
-	} {
+	data := struct {
+		Payload string        `json:"payload"`
+		Nested  common.MapStr `json:"nested"`
+	}{
 		Payload: expected,
-		Nested: common.MapStr {
+		Nested: common.MapStr{
 			"tsfield": "December 29, 2015 01:55:15PM -0000",
 		},
 	}

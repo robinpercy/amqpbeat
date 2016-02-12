@@ -6,13 +6,14 @@ import (
 	"time"
 
 	"fmt"
+	"strings"
+
 	"github.com/elastic/libbeat/beat"
 	"github.com/elastic/libbeat/cfgfile"
 	"github.com/elastic/libbeat/common"
 	"github.com/elastic/libbeat/logp"
 	"github.com/elastic/libbeat/publisher"
 	"github.com/streadway/amqp"
-	"strings"
 )
 
 type AmqpBeat struct {
