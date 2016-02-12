@@ -50,21 +50,15 @@ func (s *Settings) SetDefaults() error {
 		return errors.New("amqpinput section is missing from settings file.")
 	}
 
-	for i := range *s.AmqpInput.Channels {
-		(*s.AmqpInput.Channels)[i].SetDefaults()
-	}
+	s.AmqpInput.SetDefaults()
 
-	if s.AmqpInput.Journal == nil {
-		s.AmqpInput.Journal = new(JournalerConfig)
-	}
-
-	s.AmqpInput.Journal.SetDefaults()
 	return nil
 }
 
 // AmqpConfig ...
 type AmqpConfig struct {
 	ServerURI *string
+	DryRun    *bool
 	Channels  *[]ChannelConfig
 	Journal   *JournalerConfig
 }
@@ -78,7 +72,29 @@ func (a *AmqpConfig) CheckRequired() error {
 			c.CheckRequired(errors)
 		}
 	}
-	return errorFor(errors)
+	if len(errors) > 0 {
+		return errorFor(errors)
+	}
+
+	return nil
+}
+
+func (a *AmqpConfig) SetDefaults() error {
+
+	for i := range *a.Channels {
+		(*a.Channels)[i].SetDefaults()
+	}
+
+	if a.Journal == nil {
+		a.Journal = new(JournalerConfig)
+	}
+
+	a.Journal.SetDefaults()
+	if a.DryRun == nil {
+		a.DryRun = new(bool)
+		*a.DryRun = false
+	}
+	return nil
 }
 
 type JournalerConfig struct {
@@ -166,26 +182,37 @@ func (c *ChannelConfig) CheckRequired(errors errorMap) error {
 		errors["channel.name"] = "All channels require a name attribute"
 	}
 
-	if c.TsField == nil && c.TsFormat != nil {
+	tsErr := validateTsConfig(c.TsField, c.TsFormat, errors)
+
+	if foundErr || tsErr != nil {
+		return errorFor(errors)
+	}
+
+	return nil
+}
+
+func validateTsConfig(tsField, tsFormat *string, errors errorMap) error {
+	foundErr := false
+	if tsField == nil && tsFormat != nil {
 		foundErr = true
 		errors["channel.tsfield"] = "tsfield must be set if tsformat is set"
 	}
 
-	if c.TsField != nil && c.TsFormat == nil {
+	if tsField != nil && tsFormat == nil {
 		foundErr = true
 		errors["channel.tsformat"] = "tsformat must be set if tsfield is set"
 	}
 
-	if c.TsFormat != nil {
+	if tsFormat != nil {
 		errKey := "channel.ts.format.test"
 		errTpl := "tsformat '%s' is not a valid date format error while testing was: %v"
 
-		str := time.Now().Format(*c.TsFormat)
-		_, err := time.Parse(*c.TsFormat, str)
+		str := time.Now().Format(*tsFormat)
+		_, err := time.Parse(*tsFormat, str)
 
 		if err != nil {
 			foundErr = true
-			errors[errKey] = fmt.Sprintf(errTpl, *c.TsFormat, err)
+			errors[errKey] = fmt.Sprintf(errTpl, *tsFormat, err)
 		}
 	}
 

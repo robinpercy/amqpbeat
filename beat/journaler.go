@@ -23,7 +23,6 @@ that meets the durability requirements of the application.
 This generally requires synchronous IO (via the O_SYNC flag) to guarantee that
 the kernel buffer is flushed to disk as part of each write.  Sync IO also
 means we should be careful to fill entire blocks of data before syncing.
-This is done
 */
 type Journaler struct {
 	journalDir       string
@@ -164,7 +163,6 @@ func (j *Journaler) processEvent(d *AmqpEvent) error {
 
 	// Now that we've made room (if necessary), add the next event
 	j.emitter.add(d)
-	// TODO: add TagType as well?
 	// TODO: compress the data going to disk, will require modifying the
 	//       buffer.Available() check above
 	j.buffer.Write(bytes)
