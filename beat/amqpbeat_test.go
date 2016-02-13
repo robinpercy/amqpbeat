@@ -277,7 +277,10 @@ func helpBuildBeat(cfgFile string) (*AmqpBeat, *beat.Beat, error) {
 	if err != nil {
 		panic(err)
 	}
-	rb.Setup(b)
+	err = rb.Setup(b)
+	if err != nil {
+		panic(err)
+	}
 	return rb, b, nil
 }
 

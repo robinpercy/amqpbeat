@@ -89,6 +89,12 @@ func NewJournaler(cfg *JournalerConfig) (*Journaler, error) {
 }
 
 func (j *Journaler) openNewFile() error {
+
+	err := os.MkdirAll(j.journalDir, 0750)
+	if err != nil {
+		return fmt.Errorf("Failed to create journal dir: %v", err)
+	}
+
 	writer, err := os.OpenFile(j.genFileName(),
 		os.O_WRONLY|os.O_APPEND|os.O_CREATE|os.O_SYNC,
 		0660)
@@ -96,7 +102,7 @@ func (j *Journaler) openNewFile() error {
 	j.writer = writer
 
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to open file for journaling: %v", err)
 	}
 
 	j.buffer = bufio.NewWriter(j.writer)

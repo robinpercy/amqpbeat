@@ -3,7 +3,7 @@ amqpinput:
   dryrun: true
 
   journal:
-      journaldir: "/tmp/amqpbeat/journal"
+      journaldir: "./test.tmp/journal"
       buffersizeblocks: 16
       maxfilesizebytes: 10485760
       maxdelayms: 500
