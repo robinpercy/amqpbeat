@@ -10,6 +10,8 @@ import (
 
 	"encoding/json"
 	"github.com/elastic/libbeat/logp"
+	"bytes"
+	"errors"
 )
 
 const (
@@ -110,11 +112,38 @@ func (j *Journaler) openNewFile() error {
 	return nil
 }
 
+func (j *Journaler) closeFile() error{
+	flushErr := j.buffer.Flush()
+	closeErr := j.writer.Close()
+
+	var errBuf bytes.Buffer
+
+	if flushErr != nil {
+		errBuf.WriteString(fmt.Sprintf(":failed to flush journal buffer: %v", flushErr))
+	}
+	if closeErr != nil {
+		if errBuf.Len() > 0 {
+			errBuf.WriteString(" and ")
+		}
+		errBuf.WriteString(fmt.Sprintf("failed to close journal writer: %v", closeErr))
+	}
+
+	if errBuf.Len() > 0 {
+		return errors.New(errBuf.String())
+	}
+
+	return nil
+}
+
 func (j *Journaler) Close() {
 	defer j.emitter.close()
 	defer j.emitter.sendAll()
-	defer j.writer.Close()
-	defer j.buffer.Flush()
+	defer func() {
+		err := j.closeFile()
+		if (err != nil) {
+			logp.Err(err.Error())
+		}
+	}()
 }
 
 // Run ranges over input, buffering the journal until the buffer is full,
@@ -149,8 +178,12 @@ loop:
 func (j *Journaler) processEvent(d *AmqpEvent) error {
 	if j.curFileSizeBytes > j.maxFileSizeBytes {
 		// Rollover journal file
-		j.Close()
-		j.openNewFile()
+		j.closeFile()
+		err := j.openNewFile()
+		if err != nil {
+			return fmt.Errorf("Failed to open file for journaling: %v", err)
+		}
+		j.curFileSizeBytes = 0
 	}
 
 	// We don't have enough room in the buffer, so flush, sync and send
@@ -172,11 +205,14 @@ func (j *Journaler) processEvent(d *AmqpEvent) error {
 	// TODO: compress the data going to disk, will require modifying the
 	//       buffer.Available() check above
 	j.buffer.Write(bytes)
-
 	return nil
 }
 
 func (j *Journaler) flush() error {
+	// keep track of how many bytes we've flushed to the current file
+	// so we know when to rotate it
+	j.curFileSizeBytes +=  j.buffer.Buffered()
+
 	var flushErr error
 	for j.buffer.Buffered() > 0 &&
 		(flushErr == nil || flushErr == io.ErrShortWrite) {
