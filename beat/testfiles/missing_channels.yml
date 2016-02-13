@@ -1,2 +1,5 @@
 amqpinput:
   foo: "bar"
+
+  journal:
+      journaldir: "./test.tmp/journal"

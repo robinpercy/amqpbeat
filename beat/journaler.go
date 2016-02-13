@@ -186,18 +186,21 @@ func (j *Journaler) processEvent(d *AmqpEvent) error {
 		j.curFileSizeBytes = 0
 	}
 
-	// We don't have enough room in the buffer, so flush, sync and send
-	if len(d.body) > j.buffer.Available() {
+	bytes, err := json.Marshal(d.body)
+	if err != nil {
+		return fmt.Errorf("failed to encode to payload: %v: %v", d.body, err)
+	}
+
+	// end each record with a newline to make them easier to parse by humans and computers
+	bytes = append(bytes, []byte("\n")...)
+
+	// We don't have enough room in the buffer, so flush the journaler
+	if len(bytes) > j.buffer.Available() {
 		err := j.flush()
 
 		if err != nil {
 			return err
 		}
-	}
-
-	bytes, err := json.Marshal(d.body)
-	if err != nil {
-		return fmt.Errorf("failed to encode to payload: %v: %v", d.body, err)
 	}
 
 	// Now that we've made room (if necessary), add the next event

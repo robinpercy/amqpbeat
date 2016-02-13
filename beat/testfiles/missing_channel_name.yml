@@ -1,3 +1,6 @@
 amqpinput:
   channels:
     - notaname: "foo"
+
+  journal:
+      journaldir: "./test.tmp/journal"

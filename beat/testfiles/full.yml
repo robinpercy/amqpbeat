@@ -1,6 +1,10 @@
 amqpinput:
   serveruri: "amqp://guest:guest@localhost:5672/"
 
+  journal:
+      journaldir: "./test.tmp/journal"
+
+
   channels:
     - name: "test"
       required: true
