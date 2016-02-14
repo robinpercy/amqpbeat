@@ -15,7 +15,7 @@ import (
 const (
 	defaultJournalDir      = "/tmp/"
 	defaultJournalBlocks   = 4
-	defaultJournalSizeKB   = 20 * 1024
+	defaultJournalSizeBytes   = 20 * 1024 * 1024
 	defaultJournalMaxDelay = 500
 )
 
@@ -118,7 +118,7 @@ func (j *JournalerConfig) SetDefaults() {
 
 	if j.MaxFileSizeBytes == nil {
 		j.MaxFileSizeBytes = new(int)
-		*j.MaxFileSizeBytes = defaultJournalSizeKB
+		*j.MaxFileSizeBytes = defaultJournalSizeBytes
 	}
 
 	if j.MaxDelayMs == nil {

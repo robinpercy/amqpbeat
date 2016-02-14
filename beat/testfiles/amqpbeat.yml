@@ -7,33 +7,31 @@ amqpinput:
   journal:
       journaldir: "./test.tmp/journal"
       buffersizeblocks: 16
-      maxfilesizebytes: 10485760
-      maxdelayms: 500
 
   channels:
     - name: "testA"
       typetag: "A"
       required: true
       tsfield: "timestamp"
-      tsformat: "2006-01-02 15:16:17"
+      tsformat: "2006-01-02 15:04:05"
 
     - name: "testB"
       typetag: "B"
       required: true
       tsfield: "timestamp"
-      tsformat: "2006-01-02 15:16:17"
+      tsformat: "2006-01-02 15:04:05"
 
     - name: "testC"
       typetag: "C"
       required: true
       tsfield: "timestamp"
-      tsformat: "2006-01-02 15:16:17"
+      tsformat: "2006-01-02 15:04:05"
 
     - name: "testD"
       typetag: "D"
       required: true
       tsfield: "timestamp"
-      tsformat: "2006-01-02 15:16:17"
+      tsformat: "2006-01-02 15:04:05"
 
 ############################# Output ##########################################
 
@@ -154,7 +152,7 @@ shipper:
 
 logging:
   selectors: []
-  level: debug
+  level: info
 
   # Rotator config
   files:

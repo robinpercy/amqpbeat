@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"flag"
 	"os"
 	"sync"
 
@@ -19,6 +20,9 @@ func failOnError(err error, msg string) {
 }
 
 func main() {
+	queuePtr := flag.String("queue", "test", "name of the queue to send to")
+	flag.Parse()
+
 	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
 	failOnError(err, "Failed to connect to RabbitMQ")
 	defer conn.Close()
@@ -28,7 +32,7 @@ func main() {
 	defer ch.Close()
 
 	q, err := ch.QueueDeclare(
-		"testA",
+		*queuePtr,
 		false,
 		false,
 		false,
@@ -60,7 +64,7 @@ func readMessages(msgs chan string) {
 		payload, err := json.Marshal(event["payload"])
 
 		failOnError(err, "Failed to marshall body")
-		fmt.Println(string(payload))
+		// fmt.Println(string(payload))
 		msgs <- string(payload)
 	}
 	close(msgs)
