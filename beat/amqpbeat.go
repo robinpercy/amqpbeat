@@ -166,7 +166,7 @@ func newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFormat *string) (
 		var err error
 		ts, err = extractTS(m, *tsField, *tsFormat)
 		if err != nil {
-			logp.Warn("Failed to extract @timestamp for event, defaulting to current time ('%s'): %v", now, err)
+			logp.Debug("", "Failed to extract @timestamp for event, defaulting to current time ('%s'): %v", now, err)
 		}
 	}
 
@@ -248,13 +248,14 @@ func publishStream(stream <-chan []*AmqpEvent, client publisher.Client, wg *sync
 		for i, ev := range evList {
 			payloads[i] = ev.body
 		}
-
-		logp.Debug("", "Publishing %d events", len(evList))
+		id := time.Now().Unix()
+		logp.Info("Publishing %d events", len(evList), id)
 		success := client.PublishEvents(payloads, publisher.Sync)
+		logp.Info("Published %d events", len(evList), id)
 
 		for _, ev := range evList {
 			if success && !failedDTags[ev.deliveryTag] {
-				logp.Debug("", "Acked event")
+				logp.Info("Acked event")
 				ev.acknowledger.Ack(ev.deliveryTag, false)
 			} else {
 				logp.Err("Failed to publish event: %v", ev.body)

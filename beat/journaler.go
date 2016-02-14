@@ -215,6 +215,7 @@ func (j *Journaler) flush() error {
 	// keep track of how many bytes we've flushed to the current file
 	// so we know when to rotate it
 	j.curFileSizeBytes +=  j.buffer.Buffered()
+	logp.Debug("Journal", "Flushing journal buffer of size %d bytes", j.buffer.Buffered())
 
 	var flushErr error
 	for j.buffer.Buffered() > 0 &&
