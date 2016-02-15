@@ -107,7 +107,7 @@ func (j *Journaler) openNewFile() error {
 		return fmt.Errorf("Failed to open file for journaling: %v", err)
 	}
 
-	j.buffer = bufio.NewWriter(j.writer)
+	j.buffer = bufio.NewWriterSize(j.writer, j.bufferSizeBlocks * blockSize)
 
 	return nil
 }
@@ -196,6 +196,7 @@ func (j *Journaler) processEvent(d *AmqpEvent) error {
 
 	// We don't have enough room in the buffer, so flush the journaler
 	if len(bytes) > j.buffer.Available() {
+		logp.Debug("journal", "Journal buffer full, triggering flush")
 		err := j.flush()
 
 		if err != nil {

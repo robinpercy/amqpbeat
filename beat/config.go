@@ -81,15 +81,16 @@ func (a *AmqpConfig) CheckRequired() error {
 
 func (a *AmqpConfig) SetDefaults() error {
 
-	for i := range *a.Channels {
-		(*a.Channels)[i].SetDefaults()
-	}
-
 	if a.Journal == nil {
 		a.Journal = new(JournalerConfig)
 	}
 
 	a.Journal.SetDefaults()
+
+	for i := range *a.Channels {
+		(*a.Channels)[i].SetDefaults()
+	}
+
 	if a.DryRun == nil {
 		a.DryRun = new(bool)
 		*a.DryRun = false
@@ -142,6 +143,7 @@ type ChannelConfig struct {
 	TypeTag           *string
 	TsField           *string
 	TsFormat          *string
+	QosPrefetchCount  *int
 }
 
 func (c *ChannelConfig) SetDefaults() {
@@ -168,6 +170,11 @@ func (c *ChannelConfig) SetDefaults() {
 	if c.TypeTag == nil {
 		c.TypeTag = new(string)
 		*c.TypeTag = "event"
+	}
+
+	if c.QosPrefetchCount == nil {
+		c.QosPrefetchCount = new(int)
+		*c.QosPrefetchCount = 1024
 	}
 }
 

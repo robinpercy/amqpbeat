@@ -108,6 +108,7 @@ func (rb *AmqpBeat) runPipeline(b *beat.Beat, ch *amqp.Channel) {
 
 	var publisherGroup sync.WaitGroup
 	publisherGroup.Add(1)
+
 	go publishStream(rb.journaler.Out, b.Events, &publisherGroup)
 
 	// Wait for all consumers to receive the stop 'signal' (ie close(stop))
@@ -125,7 +126,12 @@ func (rb *AmqpBeat) runPipeline(b *beat.Beat, ch *amqp.Channel) {
 func (rb *AmqpBeat) consumeIntoStream(stream chan<- *AmqpEvent, ch *amqp.Channel, c *ChannelConfig, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	_, err := ch.QueueDeclare(*c.Name, *c.Durable, *c.AutoDelete, false, false, *c.Args)
+	err := ch.Qos(*c.QosPrefetchCount, 0, false)
+	if err != nil {
+		logp.Err("Failed to set QoS on queue '%s': %v", *c.Name, err)
+	}
+
+	_, err = ch.QueueDeclare(*c.Name, *c.Durable, *c.AutoDelete, false, false, *c.Args)
 	if err != nil {
 		logp.Err("Failed to declare queue '%s': %v", *c.Name, err)
 		return
@@ -137,12 +143,16 @@ func (rb *AmqpBeat) consumeIntoStream(stream chan<- *AmqpEvent, ch *amqp.Channel
 		return
 	}
 
+
+	i := 0
 	for {
 		select {
 		case d := <-q:
 			evt, err := newAmqpEvent(&d, c.TypeTag, c.TsField, c.TsFormat)
+			i++
+			logp.Info("Consumed %d into %s", i, *c.Name)
 			if err != nil {
-				logp.Warn("failed to build event for delivery, will nack and requeue. delivery: %v \nreason: %v", d, err)
+				logp.Warn("failed to build event for delivery, will be Nacked. (delivery = %v) (error = %v)", d, err)
 				d.Nack(false, true)
 			}
 			stream <- evt
@@ -166,7 +176,7 @@ func newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFormat *string) (
 		var err error
 		ts, err = extractTS(m, *tsField, *tsFormat)
 		if err != nil {
-			logp.Debug("", "Failed to extract @timestamp for event, defaulting to current time ('%s'): %v", now, err)
+			logp.Warn("Failed to extract @timestamp for event, defaulting to current time ('%s'): %v", now, err)
 		}
 	}
 
@@ -248,14 +258,12 @@ func publishStream(stream <-chan []*AmqpEvent, client publisher.Client, wg *sync
 		for i, ev := range evList {
 			payloads[i] = ev.body
 		}
-		id := time.Now().Unix()
-		logp.Info("Publishing %d events", len(evList), id)
+		logp.Debug("flow", "Publishing %d events", len(evList))
 		success := client.PublishEvents(payloads, publisher.Sync)
-		logp.Info("Published %d events", len(evList), id)
 
 		for _, ev := range evList {
 			if success && !failedDTags[ev.deliveryTag] {
-				logp.Info("Acked event")
+				logp.Debug("flow", "Acked event")
 				ev.acknowledger.Ack(ev.deliveryTag, false)
 			} else {
 				logp.Err("Failed to publish event: %v", ev.body)

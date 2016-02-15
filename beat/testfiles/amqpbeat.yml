@@ -6,7 +6,7 @@ amqpinput:
 
   journal:
       journaldir: "./test.tmp/journal"
-      buffersizeblocks: 100
+      buffersizeblocks: 1024
 
   channels:
     - name: "testA"
@@ -151,8 +151,8 @@ shipper:
 ############################# Logging #########################################
 
 logging:
-  selectors: []
-  level: debug
+  selectors: [flow]
+  level: info
 
   # Rotator config
   files:
