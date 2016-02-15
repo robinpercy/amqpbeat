@@ -17,9 +17,11 @@ import (
 )
 
 type AmqpBeat struct {
-	RbConfig  Settings
-	journaler *Journaler
-	stop      chan interface{}
+	RbConfig    Settings
+	journaler   *Journaler
+	stop        chan interface{}
+	isDryRun    bool
+	dryRunsLeft int
 }
 
 func (rb *AmqpBeat) Config(b *beat.Beat) error {
@@ -48,6 +50,14 @@ func (rb *AmqpBeat) ConfigWithFile(b *beat.Beat, filePath string) error {
 
 func (rb *AmqpBeat) Setup(b *beat.Beat) error {
 	rb.stop = make(chan interface{})
+
+	if rb.RbConfig.AmqpInput.DryRun != nil {
+		rb.isDryRun = true
+		rb.dryRunsLeft = *rb.RbConfig.AmqpInput.DryRun
+	} else {
+		rb.isDryRun = false
+		rb.dryRunsLeft = 0
+	}
 
 	var err error
 	rb.journaler, err = NewJournaler(rb.RbConfig.AmqpInput.Journal)
@@ -94,22 +104,22 @@ func (rb *AmqpBeat) Run(b *beat.Beat) error {
 // To stop the entire pipeline, close the rb.stop channel. This will result in all consumers exiting and incrementing
 // the consumer WaitGroup. Once we've finished waiting on that, we close the events channel, which will signal
 // the journaler to finish processing events and close its Out channel.
-func (rb *AmqpBeat) runPipeline(b *beat.Beat, ch *amqp.Channel) {
+func (ab *AmqpBeat) runPipeline(b *beat.Beat, ch *amqp.Channel) {
 
 	var consumerGroup sync.WaitGroup
-	consumerGroup.Add(len(*rb.RbConfig.AmqpInput.Channels))
+	consumerGroup.Add(len(*ab.RbConfig.AmqpInput.Channels))
 
 	events := make(chan *AmqpEvent)
-	for _, c := range *rb.RbConfig.AmqpInput.Channels {
+	for _, c := range *ab.RbConfig.AmqpInput.Channels {
 		cfg := c
-		go rb.consumeIntoStream(events, ch, &cfg, &consumerGroup)
+		go ab.consumeIntoStream(events, ch, &cfg, &consumerGroup)
 	}
-	go rb.journaler.Run((<-chan *AmqpEvent)(events), rb.stop)
+	go ab.journaler.Run((<-chan *AmqpEvent)(events), ab.stop)
 
 	var publisherGroup sync.WaitGroup
 	publisherGroup.Add(1)
 
-	go publishStream(rb.journaler.Out, b.Events, &publisherGroup)
+	go ab.publishStream(ab.journaler.Out, b.Events, &publisherGroup, ab.isDryRun, ab.dryRunsLeft)
 
 	// Wait for all consumers to receive the stop 'signal' (ie close(stop))
 	consumerGroup.Wait()
@@ -143,21 +153,20 @@ func (rb *AmqpBeat) consumeIntoStream(stream chan<- *AmqpEvent, ch *amqp.Channel
 		return
 	}
 
-
 	i := 0
 	for {
 		select {
 		case d := <-q:
 			evt, err := newAmqpEvent(&d, c.TypeTag, c.TsField, c.TsFormat)
 			i++
-			logp.Info("Consumed %d into %s", i, *c.Name)
+			logp.Debug("flow", "Consumed %d into %s", i, *c.Name)
 			if err != nil {
 				logp.Warn("failed to build event for delivery, will be Nacked. (delivery = %v) (error = %v)", d, err)
 				d.Nack(false, true)
 			}
 			stream <- evt
 		case <-rb.stop:
-			logp.Info("Consumer '%s' is stopping...")
+			logp.Info("Consumer '%s' is stopping...", *c.Name)
 			return
 		}
 	}
@@ -248,11 +257,10 @@ type AmqpEvent struct {
 	body         common.MapStr
 }
 
-func publishStream(stream <-chan []*AmqpEvent, client publisher.Client, wg *sync.WaitGroup) {
+func (ab *AmqpBeat) publishStream(stream <-chan []*AmqpEvent, client publisher.Client, wg *sync.WaitGroup,
+	isDryRun bool, dryRunsLeft int) {
 
-	var failedDTags map[uint64]bool
 	for evList := range stream {
-		failedDTags = make(map[uint64]bool)
 
 		payloads := make([]common.MapStr, len(evList))
 		for i, ev := range evList {
@@ -262,9 +270,21 @@ func publishStream(stream <-chan []*AmqpEvent, client publisher.Client, wg *sync
 		success := client.PublishEvents(payloads, publisher.Sync)
 
 		for _, ev := range evList {
-			if success && !failedDTags[ev.deliveryTag] {
-				logp.Debug("flow", "Acked event")
-				ev.acknowledger.Ack(ev.deliveryTag, false)
+			if success {
+				if isDryRun {
+					dryRunsLeft--
+					if dryRunsLeft >= 0 {
+						logp.Info("Suppressing Ack due to DryRun. %d dry runs left.", dryRunsLeft)
+					}
+					ev.acknowledger.Nack(ev.deliveryTag, false, true)
+					if dryRunsLeft == 0 {
+						// Stop and let the remaining messages get nack'ed
+						ab.Stop()
+					}
+				} else {
+					logp.Debug("flow", "Acked event")
+					ev.acknowledger.Ack(ev.deliveryTag, false)
+				}
 			} else {
 				logp.Err("Failed to publish event: %v", ev.body)
 				ev.acknowledger.Nack(ev.deliveryTag, false, true)

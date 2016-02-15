@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	defaultJournalDir      = "/tmp/"
-	defaultJournalBlocks   = 4
-	defaultJournalSizeBytes   = 20 * 1024 * 1024
-	defaultJournalMaxDelay = 500
+	defaultJournalDir       = "/tmp/"
+	defaultJournalBlocks    = 4
+	defaultJournalSizeBytes = 20 * 1024 * 1024
+	defaultJournalMaxDelay  = 500
 )
 
 // Settings ...
@@ -58,7 +58,7 @@ func (s *Settings) SetDefaults() error {
 // AmqpConfig ...
 type AmqpConfig struct {
 	ServerURI *string
-	DryRun    *bool
+	DryRun    *int
 	Channels  *[]ChannelConfig
 	Journal   *JournalerConfig
 }
@@ -91,10 +91,6 @@ func (a *AmqpConfig) SetDefaults() error {
 		(*a.Channels)[i].SetDefaults()
 	}
 
-	if a.DryRun == nil {
-		a.DryRun = new(bool)
-		*a.DryRun = false
-	}
 	return nil
 }
 

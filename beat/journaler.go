@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"encoding/json"
-	"github.com/elastic/libbeat/logp"
 	"bytes"
+	"encoding/json"
 	"errors"
+	"github.com/elastic/libbeat/logp"
 )
 
 const (
@@ -107,12 +107,12 @@ func (j *Journaler) openNewFile() error {
 		return fmt.Errorf("Failed to open file for journaling: %v", err)
 	}
 
-	j.buffer = bufio.NewWriterSize(j.writer, j.bufferSizeBlocks * blockSize)
+	j.buffer = bufio.NewWriterSize(j.writer, j.bufferSizeBlocks*blockSize)
 
 	return nil
 }
 
-func (j *Journaler) closeFile() error{
+func (j *Journaler) closeFile() error {
 	flushErr := j.buffer.Flush()
 	closeErr := j.writer.Close()
 
@@ -140,7 +140,7 @@ func (j *Journaler) Close() {
 	defer j.emitter.sendAll()
 	defer func() {
 		err := j.closeFile()
-		if (err != nil) {
+		if err != nil {
 			logp.Err(err.Error())
 		}
 	}()
@@ -215,7 +215,7 @@ func (j *Journaler) processEvent(d *AmqpEvent) error {
 func (j *Journaler) flush() error {
 	// keep track of how many bytes we've flushed to the current file
 	// so we know when to rotate it
-	j.curFileSizeBytes +=  j.buffer.Buffered()
+	j.curFileSizeBytes += j.buffer.Buffered()
 	logp.Debug("Journal", "Flushing journal buffer of size %d bytes", j.buffer.Buffered())
 
 	var flushErr error

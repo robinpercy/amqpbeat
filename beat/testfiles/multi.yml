@@ -1,6 +1,5 @@
 amqpinput:
   serveruri: "amqp://guest:guest@localhost:5672/"
-  dryrun: true
 
   journal:
       journaldir: "./test.tmp/journal"
