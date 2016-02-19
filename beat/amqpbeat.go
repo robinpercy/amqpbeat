@@ -14,6 +14,8 @@ import (
 	"github.com/elastic/libbeat/logp"
 	"github.com/elastic/libbeat/publisher"
 	"github.com/streadway/amqp"
+	"net/http"
+	"expvar"
 )
 
 type AmqpBeat struct {
@@ -22,6 +24,12 @@ type AmqpBeat struct {
 	stop        chan interface{}
 	isDryRun    bool
 	dryRunsLeft int
+	metrics     chan *metric
+}
+
+type metric struct {
+	name  string
+	value int64
 }
 
 func (rb *AmqpBeat) Config(b *beat.Beat) error {
@@ -50,6 +58,7 @@ func (rb *AmqpBeat) ConfigWithFile(b *beat.Beat, filePath string) error {
 
 func (rb *AmqpBeat) Setup(b *beat.Beat) error {
 	rb.stop = make(chan interface{})
+	rb.metrics = make(chan *metric, 100)
 
 	if rb.RbConfig.AmqpInput.DryRun != nil {
 		rb.isDryRun = true
@@ -60,7 +69,7 @@ func (rb *AmqpBeat) Setup(b *beat.Beat) error {
 	}
 
 	var err error
-	rb.journaler, err = NewJournaler(rb.RbConfig.AmqpInput.Journal)
+	rb.journaler, err = NewJournaler(rb.RbConfig.AmqpInput.Journal, rb.metrics)
 
 	if err != nil {
 		return err
@@ -72,6 +81,21 @@ func (rb *AmqpBeat) Setup(b *beat.Beat) error {
 func (rb *AmqpBeat) Run(b *beat.Beat) error {
 	logp.Info("Running...")
 	serverURI := rb.RbConfig.AmqpInput.ServerURI
+
+	go func() {
+		http.ListenAndServe(":8111", nil)
+	}()
+
+	go func (metrics chan *metric) {
+
+		mmap := make(map[string]*expvar.Int)
+		for m := range metrics {
+			if _, ok := mmap[m.name]; !ok {
+				mmap[m.name] = expvar.NewInt(m.name)
+			}
+			mmap[m.name].Set(m.value)
+		}
+	}(rb.metrics)
 
 	conn, err := amqp.Dial(*serverURI)
 	if err != nil {
@@ -152,8 +176,8 @@ func (rb *AmqpBeat) consumeIntoStream(stream chan<- *AmqpEvent, ch *amqp.Channel
 		logp.Err("Failed to consume queue %s: %v", *c.Name, err)
 		return
 	}
-
-	i := 0
+	mName := fmt.Sprintf("consumer.%s", *c.Name)
+	var i int64
 	for {
 		select {
 		case d := <-q:
@@ -165,6 +189,8 @@ func (rb *AmqpBeat) consumeIntoStream(stream chan<- *AmqpEvent, ch *amqp.Channel
 				d.Nack(false, true)
 			}
 			stream <- evt
+			rb.metrics <- &metric{name:mName, value:i}
+
 		case <-rb.stop:
 			logp.Info("Consumer '%s' is stopping...", *c.Name)
 			return
@@ -260,14 +286,18 @@ type AmqpEvent struct {
 func (ab *AmqpBeat) publishStream(stream <-chan []*AmqpEvent, client publisher.Client, wg *sync.WaitGroup,
 	isDryRun bool, dryRunsLeft int) {
 
+	pubCount := int64(0)
 	for evList := range stream {
 
-		payloads := make([]common.MapStr, len(evList))
+		evCount := len(evList)
+		payloads := make([]common.MapStr, evCount)
 		for i, ev := range evList {
 			payloads[i] = ev.body
 		}
 		logp.Debug("flow", "Publishing %d events", len(evList))
 		success := client.PublishEvents(payloads, publisher.Sync)
+		pubCount += int64(evCount)
+		ab.metrics <- &metric{"published.count", pubCount}
 
 		for _, ev := range evList {
 			if success {

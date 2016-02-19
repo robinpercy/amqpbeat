@@ -16,6 +16,11 @@ import (
 
 const (
 	blockSize = 4096
+	metricBufByt = "journal.bufferedBytes"
+    metricBufAvl = "journal.bufferAvailable"
+	metricBufQue = "journal.queued"
+	metricBytWrt = "journal.totalBytesWritten"
+	metricEvtPrc = "journal.totalEventsProcessed"
 )
 
 /*
@@ -37,6 +42,10 @@ type Journaler struct {
 	timer            *time.Timer
 	emitter          *emitter
 	Out              chan []*AmqpEvent
+	metrics          chan *metric
+	totalBytesWrit   int64
+	totalEvtsProcd   int64
+
 }
 
 type emitter struct {
@@ -61,7 +70,7 @@ func (e *emitter) close() {
 	close(e.output)
 }
 
-func NewJournaler(cfg *JournalerConfig) (*Journaler, error) {
+func NewJournaler(cfg *JournalerConfig, metrics chan *metric) (*Journaler, error) {
 
 	out := make(chan []*AmqpEvent)
 	emitter := &emitter{
@@ -79,6 +88,7 @@ func NewJournaler(cfg *JournalerConfig) (*Journaler, error) {
 		timer:            time.NewTimer(maxDelay),
 		emitter:          emitter,
 		Out:              out,
+		metrics:		  metrics,
 	}
 
 	err := j.openNewFile()
@@ -209,7 +219,17 @@ func (j *Journaler) processEvent(d *AmqpEvent) error {
 	// TODO: compress the data going to disk, will require modifying the
 	//       buffer.Available() check above
 	j.buffer.Write(bytes)
+	j.refreshMetrics()
+
 	return nil
+}
+
+func (j *Journaler) refreshMetrics() {
+	j.metrics <- &metric{metricBufByt, int64(j.buffer.Buffered())}
+	j.metrics <- &metric{metricBufAvl, int64(j.buffer.Available())}
+	j.metrics <- &metric{metricBufQue, int64(len(j.emitter.queuedEvents))}
+	j.metrics <- &metric{metricBytWrt, int64(j.totalBytesWrit)}
+	j.metrics <- &metric{metricEvtPrc, int64(j.totalEvtsProcd)}
 }
 
 func (j *Journaler) flush() error {
@@ -219,6 +239,7 @@ func (j *Journaler) flush() error {
 	logp.Debug("Journal", "Flushing journal buffer of size %d bytes", j.buffer.Buffered())
 
 	var flushErr error
+	j.totalBytesWrit += int64(j.buffer.Buffered())
 	for j.buffer.Buffered() > 0 &&
 		(flushErr == nil || flushErr == io.ErrShortWrite) {
 
@@ -233,8 +254,10 @@ func (j *Journaler) flush() error {
 		return flushErr
 	}
 
+	j.totalEvtsProcd += int64(len(j.emitter.queuedEvents))
 	j.emitter.sendAll()
 	j.resetTimer()
+	j.refreshMetrics()
 
 	return nil
 }
