@@ -87,11 +87,14 @@ func (rb *AmqpBeat) Run(b *beat.Beat) error {
 	}()
 
 	go func (metrics chan *metric) {
-
 		mmap := make(map[string]*expvar.Int)
 		for m := range metrics {
 			if _, ok := mmap[m.name]; !ok {
-				mmap[m.name] = expvar.NewInt(m.name)
+				v := expvar.Get(m.name)
+				if v == nil {
+					v = expvar.NewInt(m.name)
+				}
+				mmap[m.name] = v.(*expvar.Int)
 			}
 			mmap[m.name].Set(m.value)
 		}
