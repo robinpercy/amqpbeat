@@ -78,11 +78,9 @@ func (rb *AmqpBeat) Setup(b *beat.Beat) error {
 	return nil
 }
 
-func (rb *AmqpBeat) Run(b *beat.Beat) error {
-	logp.Info("Running...")
-	serverURI := rb.RbConfig.AmqpInput.ServerURI
-
+func (ab *AmqpBeat) exposeMetrics() {
 	go func() {
+		// TODO: move the port and host binding to configs
 		http.ListenAndServe(":8111", nil)
 	}()
 
@@ -98,7 +96,14 @@ func (rb *AmqpBeat) Run(b *beat.Beat) error {
 			}
 			mmap[m.name].Set(m.value)
 		}
-	}(rb.metrics)
+	}(ab.metrics)
+}
+
+func (rb *AmqpBeat) Run(b *beat.Beat) error {
+	logp.Info("Running...")
+	serverURI := rb.RbConfig.AmqpInput.ServerURI
+
+	rb.exposeMetrics()
 
 	conn, err := amqp.Dial(*serverURI)
 	if err != nil {

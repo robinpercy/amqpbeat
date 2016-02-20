@@ -3,7 +3,7 @@
 ############################# amqpbeat ######################################
 amqpinput:
   serveruri: "amqp://guest:guest@localhost:5672/"
-  dryrun: 100
+#  dryrun: 100
 
   journal:
       journaldir: "./test.tmp/journal"
