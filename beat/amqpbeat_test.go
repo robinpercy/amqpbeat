@@ -82,7 +82,7 @@ func TestNestedTsField(t *testing.T) {
 		},
 	}
 
-	ts, err := extractTS(m, "foo.bar.tsfield", "January 02, 2006 03:04:05PM -0700")
+	ts, err := extractTS(m, "foo[>]bar[>]tsfield", "January 02, 2006 03:04:05PM -0700")
 	assert.Nil(t, err)
 	bytes, _ := ts.MarshalJSON()
 	str := string(bytes)
@@ -109,7 +109,7 @@ func TestSingleMessage(t *testing.T) {
 	rb, b, _ := helpBuildBeat("./testfiles/full.yml")
 	c0 := &(*rb.RbConfig.AmqpInput.Channels)[0]
 	c0.TsField = new(string)
-	*c0.TsField = "nested.tsfield"
+	*c0.TsField = "nested[>]tsfield"
 	c0.TsFormat = new(string)
 	*c0.TsFormat = "January 02, 2006 03:04:05PM -0700"
 

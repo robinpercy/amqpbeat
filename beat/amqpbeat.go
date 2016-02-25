@@ -18,6 +18,10 @@ import (
 	"expvar"
 )
 
+const (
+	nestingDelim = "[>]"
+)
+
 type AmqpBeat struct {
 	RbConfig    Settings
 	journaler   *Journaler
@@ -264,7 +268,7 @@ func extractTS(m common.MapStr, tsField, tsFormat string) (common.Time, error) {
 	// NOTE: this only works if keys do not contain periods.
 	// TODO: support periods in path components
 	dflt := common.Time(time.Now())
-	path := strings.Split(tsField, ".")
+	path := strings.Split(tsField, nestingDelim)
 	submap := m
 	var ok bool
 	for _, k := range path[:len(path)-1] {
