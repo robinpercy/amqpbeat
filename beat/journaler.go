@@ -174,6 +174,13 @@ loop:
 			if !more {
 				break loop
 			}
+			if d == nil {
+				// This seems to coincide with server disconnects, but its not clearly documented
+				// in the amqp lib
+				logp.Warn("Journaler recieved nil delivery, ignoring")
+				continue
+			}
+
 			err = j.processEvent(d)
 		case <-j.timer.C:
 			err = j.flush()
@@ -186,6 +193,7 @@ loop:
 }
 
 func (j *Journaler) processEvent(d *AmqpEvent) error {
+
 	if j.curFileSizeBytes > j.maxFileSizeBytes {
 		// Rollover journal file
 		j.closeFile()

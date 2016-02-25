@@ -10,7 +10,6 @@ import (
 	"github.com/elastic/libbeat/beat"
 	"github.com/elastic/libbeat/common"
 	"github.com/elastic/libbeat/publisher"
-	"github.com/robinpercy/amqpbeat/utils"
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
 	"strings"
@@ -306,16 +305,22 @@ func newPublisher(serverURI string, cfg *ChannelConfig, ch *amqp.Channel) *Publi
 
 	if ch == nil {
 		conn, err = amqp.Dial(serverURI)
-		utils.FailOnError(err, "Failed to connect to RabbitMQ")
+		if err != nil {
+			panic(fmt.Errorf("Failed to connect to RabbitMQ: %v", err))
+		}
 
 		ch, err = conn.Channel()
-		utils.FailOnError(err, "Failed to open a channel")
+		if err != nil {
+			panic(fmt.Errorf("Failed to open a channel: %v", err))
+		}
 	}
 
 	_, err = ch.QueueDeclare(*cfg.Name, *cfg.Durable, *cfg.AutoDelete, *cfg.Exclusive, false, *cfg.Args)
-	ch.QueuePurge(*cfg.Name, true)
+	if err != nil {
+		panic(fmt.Errorf("Failed to declare queue %s: %v", cfg.Name, err))
+	}
 
-	utils.FailOnError(err, fmt.Sprintf("Failed to declare queue %s", cfg.Name))
+	ch.QueuePurge(*cfg.Name, true)
 	return &Publisher{exch: "", routingKey: *cfg.Name, conn: conn, ch: ch, typeTag: *cfg.TypeTag}
 }
 
@@ -333,7 +338,10 @@ func (p *Publisher) send(msg string) {
 		ContentType:  "text/plain",
 		Body:         []byte(msg),
 	})
-	utils.FailOnError(err, "Failed to publish message")
+
+	if err != nil {
+		panic(fmt.Errorf("Failed to publish message: %v", err))
+	}
 }
 
 type MockClient struct {

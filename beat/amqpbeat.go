@@ -99,11 +99,32 @@ func (ab *AmqpBeat) exposeMetrics() {
 	}(ab.metrics)
 }
 
-func (rb *AmqpBeat) Run(b *beat.Beat) error {
-	logp.Info("Running...")
-	serverURI := rb.RbConfig.AmqpInput.ServerURI
+func (ab *AmqpBeat) handleDisconnect(conn *amqp.Connection) {
+	connClosed := make(chan *amqp.Error)
+	conn.NotifyClose(connClosed)
 
-	rb.exposeMetrics()
+	go func() {
+		// This select is here to remove a race condition that
+		// can appear since stopping the beat triggers
+		// a disconnect. Calling ab.Stop() in that
+		// case causes a panic, since the stop chan is
+		// already closed
+		select {
+		case <-ab.stop:
+			// already stooped, fall through
+		case <-connClosed:
+			// server disconnect received
+			logp.Info("Detected AMQP connection closed. Stopping.")
+			ab.Stop()
+		}
+	}()
+}
+
+func (ab *AmqpBeat) Run(b *beat.Beat) error {
+	logp.Info("Running...")
+	serverURI := ab.RbConfig.AmqpInput.ServerURI
+
+	ab.exposeMetrics()
 
 	conn, err := amqp.Dial(*serverURI)
 	if err != nil {
@@ -112,6 +133,8 @@ func (rb *AmqpBeat) Run(b *beat.Beat) error {
 	}
 	defer conn.Close()
 
+	ab.handleDisconnect(conn)
+
 	ch, err := conn.Channel()
 	if err != nil {
 		logp.Err("Failed to open RabbitMQ channel: %v", err)
@@ -119,7 +142,7 @@ func (rb *AmqpBeat) Run(b *beat.Beat) error {
 	}
 	defer ch.Close()
 
-	rb.runPipeline(b, ch)
+	ab.runPipeline(b, ch)
 
 	return nil
 }
@@ -204,6 +227,7 @@ func (rb *AmqpBeat) consumeIntoStream(stream chan<- *AmqpEvent, ch *amqp.Channel
 			return
 		}
 	}
+	logp.Info("Consumer '%s' has stopped.")
 }
 
 func newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFormat *string) (*AmqpEvent, error) {
