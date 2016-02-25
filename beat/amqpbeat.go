@@ -245,7 +245,7 @@ func newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFormat *string) (
 	ts := common.Time(now)
 	if tsField != nil && tsFormat != nil {
 		var err error
-		ts, err = extractTS(m, *tsField, *tsFormat)
+		ts, err = extractTS(m, *tsField, *tsFormat, common.Time(delivery.Timestamp))
 		if err != nil {
 			logp.Warn("Failed to extract @timestamp for event, defaulting to current time ('%s'): %v", now, err)
 		}
@@ -264,10 +264,7 @@ func newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFormat *string) (
 
 }
 
-func extractTS(m common.MapStr, tsField, tsFormat string) (common.Time, error) {
-	// NOTE: this only works if keys do not contain periods.
-	// TODO: support periods in path components
-	dflt := common.Time(time.Now())
+func extractTS(m common.MapStr, tsField, tsFormat string, dflt common.Time) (common.Time, error) {
 	path := strings.Split(tsField, nestingDelim)
 	submap := m
 	var ok bool

@@ -65,7 +65,7 @@ func TestExtractTsFormats(t *testing.T) {
 	for _, tst := range tests {
 		m := make(common.MapStr)
 		m[tst.tsField] = tst.tsValue
-		ts, err := extractTS(m, tst.tsField, tst.tsFormat)
+		ts, err := extractTS(m, tst.tsField, tst.tsFormat, common.Time(time.Now()))
 		assert.Nil(t, err)
 		bytes, _ := ts.MarshalJSON()
 		str := string(bytes)
@@ -82,7 +82,7 @@ func TestNestedTsField(t *testing.T) {
 		},
 	}
 
-	ts, err := extractTS(m, "foo[>]bar[>]tsfield", "January 02, 2006 03:04:05PM -0700")
+	ts, err := extractTS(m, "foo[>]bar[>]tsfield", "January 02, 2006 03:04:05PM -0700", common.Time(time.Now()))
 	assert.Nil(t, err)
 	bytes, _ := ts.MarshalJSON()
 	str := string(bytes)
