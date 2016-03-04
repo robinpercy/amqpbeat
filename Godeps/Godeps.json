@@ -3,6 +3,11 @@
 	"GoVersion": "go1.5",
 	"Deps": [
 		{
+			"ImportPath": "code.google.com/p/go-uuid/uuid",
+			"Comment": "null-15",
+			"Rev": "'35bc42037350f0078e3c974c6ea690f1926603ab'"
+		},
+		{
 			"ImportPath": "github.com/elastic/libbeat/beat",
 			"Comment": "v1.0.0-36-gbe66518",
 			"Rev": "be665188c99be9e1519a8213fd49abd7573f508b"
