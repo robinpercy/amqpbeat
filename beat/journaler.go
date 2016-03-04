@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	blockSize = 4096
+	blockSize    = 4096
 	metricBufByt = "journal.bufferedBytes"
-    metricBufAvl = "journal.bufferAvailable"
+	metricBufAvl = "journal.bufferAvailable"
 	metricBufQue = "journal.queued"
 	metricBytWrt = "journal.totalBytesWritten"
 	metricEvtPrc = "journal.totalEventsProcessed"
@@ -45,7 +45,6 @@ type Journaler struct {
 	metrics          chan *metric
 	totalBytesWrit   int64
 	totalEvtsProcd   int64
-
 }
 
 type emitter struct {
@@ -88,7 +87,7 @@ func NewJournaler(cfg *JournalerConfig, metrics chan *metric) (*Journaler, error
 		timer:            time.NewTimer(maxDelay),
 		emitter:          emitter,
 		Out:              out,
-		metrics:		  metrics,
+		metrics:          metrics,
 	}
 
 	err := j.openNewFile()

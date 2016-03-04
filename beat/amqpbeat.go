@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"expvar"
 	"github.com/elastic/libbeat/beat"
 	"github.com/elastic/libbeat/cfgfile"
 	"github.com/elastic/libbeat/common"
@@ -15,7 +16,7 @@ import (
 	"github.com/elastic/libbeat/publisher"
 	"github.com/streadway/amqp"
 	"net/http"
-	"expvar"
+	"code.google.com/p/go-uuid/uuid"
 )
 
 const (
@@ -84,11 +85,10 @@ func (rb *AmqpBeat) Setup(b *beat.Beat) error {
 
 func (ab *AmqpBeat) exposeMetrics() {
 	go func() {
-		// TODO: move the port and host binding to configs
-		http.ListenAndServe(":8111", nil)
+		http.ListenAndServe(*ab.RbConfig.AmqpInput.StatsAddress, nil)
 	}()
 
-	go func (metrics chan *metric) {
+	go func(metrics chan *metric) {
 		mmap := make(map[string]*expvar.Int)
 		for m := range metrics {
 			if _, ok := mmap[m.name]; !ok {
@@ -115,7 +115,7 @@ func (ab *AmqpBeat) handleDisconnect(conn *amqp.Connection) {
 		// already closed
 		select {
 		case <-ab.stop:
-			// already stooped, fall through
+		// already stooped, fall through
 		case <-connClosed:
 			// server disconnect received
 			logp.Info("Detected AMQP connection closed. Stopping.")
@@ -212,19 +212,19 @@ func (rb *AmqpBeat) consumeIntoStream(stream chan<- *AmqpEvent, ch *amqp.Channel
 		return
 	}
 	mName := fmt.Sprintf("consumer.%s", *c.Name)
-	var i int64
+	var msgCount int64
 	for {
 		select {
 		case d := <-q:
-			evt, err := newAmqpEvent(&d, c.TypeTag, c.TsField, c.TsFormat)
-			i++
-			logp.Debug("flow", "Consumed %d into %s", i, *c.Name)
+			evt, err := rb.newAmqpEvent(&d, c.TypeTag, c.TsField, c.TsFormat)
+			msgCount++
+			logp.Debug("flow", "Consumed %d into %s", msgCount, *c.Name)
 			if err != nil {
 				logp.Warn("failed to build event for delivery, will be Nacked. (delivery = %v) (error = %v)", d, err)
 				d.Nack(false, true)
 			}
 			stream <- evt
-			rb.metrics <- &metric{name:mName, value:i}
+			rb.metrics <- &metric{name: mName, value: msgCount}
 
 		case <-rb.stop:
 			logp.Info("Consumer '%s' is stopping...", *c.Name)
@@ -234,23 +234,23 @@ func (rb *AmqpBeat) consumeIntoStream(stream chan<- *AmqpEvent, ch *amqp.Channel
 	logp.Info("Consumer '%s' has stopped.")
 }
 
-func newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFormat *string) (*AmqpEvent, error) {
+func (ab *AmqpBeat) newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFormat *string) (*AmqpEvent, error) {
 	m := common.MapStr{}
 	err := json.Unmarshal(delivery.Body, &m)
 	if err != nil {
 		return nil, fmt.Errorf("error unmarshalling delivery %v: %v", delivery.Body, err)
 	}
 
-	now := time.Now()
-	ts := common.Time(now)
+	ts := common.Time(delivery.Timestamp)
 	if tsField != nil && tsFormat != nil {
 		var err error
 		ts, err = extractTS(m, *tsField, *tsFormat, common.Time(delivery.Timestamp))
 		if err != nil {
-			logp.Warn("Failed to extract @timestamp for event, defaulting to current time ('%s'): %v", now, err)
+			logp.Warn("Failed to extract @timestamp for event, defaulting to delivery time ('%s'): %v", ts, err)
 		}
 	}
 
+	sanitize(m, ab.RbConfig.AmqpInput)
 	m["type"] = *typeTag
 	m["@timestamp"] = ts
 
@@ -262,6 +262,67 @@ func newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFormat *string) (
 
 	return ev, nil
 
+}
+
+// Recursively sanitizes the map keys. see (*AmqpBeat).sanitizeKey
+func sanitize(m common.MapStr, cfg *AmqpConfig) {
+	// We do a DFS traversal of the nested maps, replacing the keys with sanitized versions
+	// Since key replacement is a delete + add, we need to wait until all items in a given
+	// map have been traversed before we update the keys. So we use a replacements map
+	// to keep track of which keys need to be replaced. Then do the replacements outside
+	// of the traversal iteration.
+
+	replacements := make(map[string]string)
+	for oldK, v := range m {
+
+		if subm, ok := v.(common.MapStr); ok {
+			sanitize(subm, cfg)
+		}
+
+		newK := sanitizeKey(oldK, cfg)
+
+		// Valid keys should be left unchanged
+		if newK == oldK {
+			continue
+		}
+
+		if len(newK) == 0 {
+			// In the unlikely event we end up with an empty key, (eg if k = '____')
+			newK = uuid.New()
+			logp.Warn("Sanitizing key %s resulted in empty string, using UUID: %s instead", oldK, newK)
+		}
+
+		if _, ok := m[newK]; ok{
+			// In the unlikely event we end up with a collision on the key name, append a UUID
+			collidingK := newK
+			newK = fmt.Sprintf("%s_%s", newK, uuid.New())
+			logp.Warn("Sanitizing key %s resulted in collision with %s, appended UUID: %s", oldK, collidingK, newK)
+		}
+
+		replacements[oldK] = newK
+	}
+
+	// Do the key manipulation as a separate step so that the our traversal loop above
+	// doesn't process the new keys
+	for oldK, newK := range replacements {
+		m[newK] = m[oldK]
+		delete(m, oldK)
+	}
+}
+
+// Replaces all leading underscores and all periods/dots in the key with the configured replacement strings
+func sanitizeKey(k string, cfg *AmqpConfig) string{
+	// Replace periods first, to make sure we catch leading periods that turn into leading underscores
+	newK := strings.Replace(k, ".", *cfg.DotReplace, -1)
+	n := 0
+	for _, c := range newK {
+		if c != '_' {
+			break
+		}
+		n++
+	}
+	newK = strings.Replace(newK, "_", *cfg.LUnderReplace, n)
+	return newK
 }
 
 func extractTS(m common.MapStr, tsField, tsFormat string, dflt common.Time) (common.Time, error) {

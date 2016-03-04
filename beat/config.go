@@ -17,6 +17,9 @@ const (
 	defaultJournalBlocks    = 4
 	defaultJournalSizeBytes = 20 * 1024 * 1024
 	defaultJournalMaxDelay  = 500
+	defaultStatsAddr        = ":8111"
+	defaultLUnderReplace    = ""
+	defaultDotReplace       = "_"
 )
 
 // Settings ...
@@ -57,10 +60,13 @@ func (s *Settings) SetDefaults() error {
 
 // AmqpConfig ...
 type AmqpConfig struct {
-	ServerURI *string
-	DryRun    *int
-	Channels  *[]ChannelConfig
-	Journal   *JournalerConfig
+	ServerURI     *string
+	DryRun        *int
+	Channels      *[]ChannelConfig
+	Journal       *JournalerConfig
+	StatsAddress  *string
+	LUnderReplace *string
+	DotReplace    *string
 }
 
 func (a *AmqpConfig) CheckRequired() error {
@@ -85,7 +91,26 @@ func (a *AmqpConfig) SetDefaults() error {
 		a.Journal = new(JournalerConfig)
 	}
 
+	if a.StatsAddress == nil {
+		a.StatsAddress = new(string)
+		*a.StatsAddress = defaultStatsAddr
+	}
+
+	if a.LUnderReplace == nil {
+		a.LUnderReplace = new(string)
+		*a.LUnderReplace = defaultLUnderReplace
+	}
+
+	if a.DotReplace == nil {
+		a.DotReplace = new(string)
+		*a.DotReplace = defaultDotReplace
+	}
+
 	a.Journal.SetDefaults()
+
+	if a.Channels == nil {
+		a.Channels = new([]ChannelConfig)
+	}
 
 	for i := range *a.Channels {
 		(*a.Channels)[i].SetDefaults()

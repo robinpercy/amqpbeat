@@ -89,6 +89,77 @@ func TestNestedTsField(t *testing.T) {
 	assert.Equal(t, tsOutput, strings.Trim(str, "\""))
 }
 
+func TestSanitizeKey(t *testing.T) {
+	tests := map[string]string {
+		"___abcd_efg": "abcd_efg",
+		"_abcd_efg": "abcd_efg",
+		"_.abc.def.ghi.": "abc_def_ghi_",
+		".abc.def.": "abc_def_",
+	}
+
+	cfg := &AmqpConfig{}
+	cfg.SetDefaults()
+
+	for input, expected := range tests {
+		assert.Equal(t, expected, sanitizeKey(input, cfg))
+	}
+}
+
+func TestSanitize(t *testing.T) {
+	m := common.MapStr {
+		"_.a.b." : common.MapStr {
+			"_._def.xyz_": common.MapStr {
+				"__test.foo.": "_._._._.",
+			},
+		},
+	}
+
+	k0 := "a_b_"
+	k1 := "def_xyz_"
+	k2 := "test_foo_"
+
+	cfg := &AmqpConfig{}
+	cfg.SetDefaults()
+	sanitize(m, cfg)
+
+	assert.Equal(t, 1, len(m))
+	_, ok := m[k0]; assert.True(t, ok)
+	m0 := m[k0].(common.MapStr)
+
+	_, ok = m0[k1]; assert.True(t, ok)
+	m1 := m0[k1].(common.MapStr)
+	assert.Equal(t, 1, len(m1))
+
+	_, ok = m1[k2]; assert.True(t, ok)
+	s := m1[k2].(string)
+	assert.Equal(t, "_._._._.", s)
+}
+
+func TestSanitizeEdgeCases(t *testing.T) {
+	m := common.MapStr {
+		"_.a.b" : "collision1",
+		"a_b" : "collision2",
+		"___" : "empty",
+	}
+
+	cfg := &AmqpConfig{}
+	cfg.SetDefaults()
+	sanitize(m, cfg)
+
+	for k, v := range m {
+		if v == "collision1" {
+			assert.Equal(t, 0, strings.Index(k, "a_b"))
+			assert.Equal(t, 3+1+36, len(k))
+		}
+		if v == "collision2" {
+			assert.Equal(t, "a_b", k)
+		}
+		if v == "empty" {
+			assert.Equal(t, 36, len(k))
+		}
+	}
+}
+
 func TestSingleMessage(t *testing.T) {
 
 	expected := "This is a test"
