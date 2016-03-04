@@ -241,12 +241,13 @@ func (ab *AmqpBeat) newAmqpEvent(delivery *amqp.Delivery, typeTag, tsField, tsFo
 		return nil, fmt.Errorf("error unmarshalling delivery %v: %v", delivery.Body, err)
 	}
 
-	ts := common.Time(delivery.Timestamp)
+	now := time.Now()
+	ts := common.Time(now)
 	if tsField != nil && tsFormat != nil {
 		var err error
-		ts, err = extractTS(m, *tsField, *tsFormat, common.Time(delivery.Timestamp))
+		ts, err = extractTS(m, *tsField, *tsFormat, ts)
 		if err != nil {
-			logp.Warn("Failed to extract @timestamp for event, defaulting to delivery time ('%s'): %v", ts, err)
+			logp.Warn("Failed to extract @timestamp for event, defaulting to delivery time ('%s'): %v", now, err)
 		}
 	}
 
